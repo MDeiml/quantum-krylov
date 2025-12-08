@@ -224,3 +224,9 @@ plt.plot(xs, poly(xs))
 plt.plot(xs, p_qsvt(xs))
 plt.plot(A, abs(b), ".")
 plt.show()
+
+
+def greedy_partition(poly: Chebyshev) -> list[Chebyshev]:
+    M = poly.degree()
+    basis = construct_basis_l(M)
+    poly_lo = interpolate_l(M, poly)
