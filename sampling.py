@@ -1,17 +1,7 @@
 import numpy as np
 from util import sup_norm
-from scipy.stats import ortho_group, poisson
+from scipy.stats import poisson
 from symqsp import compute_angles
-
-
-def generate_noise_flips(rng, dim, n):
-    # Simulate one ancilla bit
-    # TODO: Should this be more?
-    random_rotations = ortho_group.rvs(dim * 2, n, rng)
-    flipped_rotations = np.concatenate(
-        (random_rotations[:, dim:, :], random_rotations[:, :dim, :]), axis=1
-    )
-    return random_rotations.swapaxes(-1, -2) @ flipped_rotations
 
 
 class NoiseModel:
@@ -38,7 +28,6 @@ class NoiseModel:
         n = b.shape[0]
         self.S = np.linspace(1 / kappa, 1, n)
 
-        # No need to make this random since Q is random
         self.b = b
         self.m = m
         self.solution = np.dot(self.m, self.b / self.S)
@@ -73,10 +62,29 @@ class NoiseModel:
 
         poly = poly.convert(kind=np.polynomial.Chebyshev)
 
+        parity = poly.degree() % 2
+        is_parity = np.allclose(poly.coef[(1 - parity) :: 2], 0, atol=1e-6)
+
+        # TODO: Also consider applications of b so that samples = inf makes sense
         self.calls += poly.degree() * samples
         S = self.S
         if root:
             S = np.sqrt(self.S)
+
+        estimate = 0
+        if not is_parity:
+            coefs_non_parity = poly.coef[:-1].copy()
+            coefs_non_parity[parity::2] = 0
+            poly_non_parity = np.polynomial.Chebyshev(coefs_non_parity)
+            estimate += self._estimate_poly(S, x, y, poly_non_parity, samples)
+        coefs_parity = poly.coef.copy()
+        coefs_parity[1 - parity :: 2] = 0
+        poly_parity = np.polynomial.Chebyshev(coefs_parity)
+        estimate += self._estimate_poly(S, x, y, poly_parity, samples)
+
+        return estimate
+
+    def _estimate_poly(self, S, x, y, poly, samples):
 
         # Resulting state
         result = poly(S) * x
@@ -88,14 +96,12 @@ class NoiseModel:
         if np.isinf(samples):
             return sign * probability
 
-        normalization = 1
-        if not poly_normalized:
-            normalization = sup_norm(poly) * 1.01
-
         # Known angles for Chebyshev polynomials
-        if np.allclose(poly.coef / normalization, np.array([0] * poly.degree() + [1])):
+        if np.allclose(poly.coef, np.array([0] * poly.degree() + [1])):
             angles = np.zeros(poly.degree() + 1)
+            normalization = 1
         else:
+            normalization = sup_norm(poly) * 1.01
             angles = None
             max_tries = 100
             for _ in range(max_tries):
@@ -106,17 +112,11 @@ class NoiseModel:
             if angles is None:
                 raise RuntimeError(f"Could not compute angles for {poly}")
 
-        ones = self.simulate_qsp(angles, samples, qoi, root)
-        return normalization * sign * np.sqrt(ones / samples)
+        ones = self.simulate_qsp(S, x, y, angles, samples)
+        return sign * normalization * np.sqrt(ones / samples)
 
-    def simulate_qsp(self, angles, samples, qoi, root):
-        S = self.S
-        if root:
-            S = np.sqrt(self.S)
+    def simulate_qsp(self, S, x, y, angles, samples):
         S_sqrt = 1j * np.sqrt(1 - S**2)
-
-        x = self.b
-        y = self.m if qoi else self.b
 
         dim = self.b.shape[0]
 

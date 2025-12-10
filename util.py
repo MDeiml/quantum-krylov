@@ -1,4 +1,16 @@
 import numpy as np
+from scipy.stats import ortho_group
+
+
+def generate_noise_flips(rng, dim, n):
+    # Simulate one ancilla bit
+    # TODO: Should this be more?
+    random_rotations = ortho_group.rvs(dim * 2, n, rng)
+    flipped_rotations = np.concatenate(
+        (random_rotations[:, dim:, :], random_rotations[:, :dim, :]), axis=1
+    )
+    return random_rotations.swapaxes(-1, -2) @ flipped_rotations
+
 
 def sup_norm(poly):
     """
