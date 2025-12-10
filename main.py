@@ -1,5 +1,6 @@
 import numpy as np
-from sampling import NoiseModel, generate_noise_flips
+from sampling import NoiseModel
+from util import generate_noise_flips
 from solver import KrylovSolver, StationarySolver
 from tqdm import tqdm
 import itertools

@@ -63,6 +63,7 @@ class Solver:
 
     def plot(self, A):
         import matplotlib.pyplot as plt
+
         poly = self.compute_polynomial(A)
         xs = np.linspace(-1, 1, 200)
         if self.transform_method == "square":
