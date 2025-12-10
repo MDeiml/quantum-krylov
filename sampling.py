@@ -43,7 +43,13 @@ class NoiseModel:
         return self.calls
 
     def estimate_poly(
-        self, poly, samples, qoi=False, root=False, poly_normalized=False
+        self,
+        poly,
+        samples,
+        qoi=False,
+        project_to_b=False,
+        root=False,
+        poly_normalized=False,
     ):
         """
         Simulate estimation of b^T poly(A) b (qoi = False) or m^T poly(A) b (qoi = True)
@@ -51,11 +57,18 @@ class NoiseModel:
         :param poly: The matrix polynomial to be computed
         :param samples: The number of simulated samples. Can be np.inf
         :param qoi: Whether to compute inner products (m, b) or (b, b)
-        :param root: If True, compute poly(sqrt(A)) instead
+        :param project_to_b: If True, compute poly((I - bb^T)A) instead
+        :param root: If True, compute poly(sqrt(A)) instead, not compatible with ``project_to_b``
         :param poly_normalized:
             Should be set to True if |poly(x)| < 1 for x \\in [-1, 1] to avoid
             extra computational work.
         """
+
+        # Even though the combination of root and project_to_b can be well
+        # defined, it is unrealistic that one actually has access to a
+        # decomposition C^TC = (I - b^Tb)A
+        if root and project_to_b:
+            raise ValueError("root and project_to_b cannot be used at the same time")
 
         x = self.b
         y = self.m if qoi else self.b
@@ -70,15 +83,67 @@ class NoiseModel:
         S = self.S
         if root:
             S = np.sqrt(self.S)
+        elif project_to_b:
+            # TODO: Extra noise
+            assert qoi, "project_to_b = True and qoi = False is not implemented"
+            A = (np.eye(S.shape[0]) - np.outer(x, x)) @ np.diag(S)
+            U, S, V = np.linalg.svd(A)
+            x = U.T @ x
+            y = V @ y
+
+            # # TODO: How does this make sense?
+            sign = np.sign(y[-1] * self.solution)
+            V[-1] *= sign
+            y[-1] *= sign
+            sign = np.sign(x[-1])
+            U[-1] *= sign
+            x[-1] *= sign
+
+            # Sanity check: b should be a left singular vector for the singular
+            # value 0
+            assert abs(np.abs(x[-1]) - 1) < 1e-8, x
+            np.testing.assert_allclose(x[:-1], 0, atol=1e-8)
+            # The smallest singular value should be 0
+            assert abs(S[-1]) < 1e-8, S
+            # And the second smallest should be at least 1/kappa
+            assert S[-2] > 1 / self.kappa - 1e-8, S
+            # x should be the right singular vector for the singular value 0
+            solution = self.b / self.S
+            solution /= np.linalg.norm(solution)
+            if not np.allclose(V[-1], solution, atol=1e-8):
+                np.testing.assert_allclose(V[-1], -solution, atol=1e-8)
+            # The component of y corresponding to the singular value zero
+            # should be the qoi when computed with the normalized solution
+            reference = np.dot(solution, self.m)
+            assert abs(y[-1] - reference) < 1e-8, (y, reference)
+            # assert abs(abs(y[-1]) - abs(reference)) < 1e-8, (y, reference)
+
+            # print(self.solution - np.dot(y, poly(S) * x), np.linalg.norm(self.b / self.S), poly(S) * x)
+            # print(poly(S))
+            # return np.dot(y, poly(S) * x)
+
+        estimate = 0
         if not is_parity:
             coefs_non_parity = poly.coef[:-1].copy()
             coefs_non_parity[parity::2] = 0
             poly_non_parity = np.polynomial.Chebyshev(coefs_non_parity)
-            estimate += self._estimate_poly(S, x, y, poly_non_parity, samples)
+            if parity == 1 and project_to_b:
+                estimate += np.sqrt(
+                    np.maximum(
+                        0, self._estimate_poly(S, y, y, poly_non_parity, samples)
+                    )
+                )
+            else:
+                estimate += self._estimate_poly(S, x, y, poly_non_parity, samples)
         coefs_parity = poly.coef.copy()
         coefs_parity[1 - parity :: 2] = 0
         poly_parity = np.polynomial.Chebyshev(coefs_parity)
-        estimate += self._estimate_poly(S, x, y, poly_parity, samples)
+        if parity == 0 and project_to_b:
+            estimate += np.sqrt(
+                np.maximum(0, self._estimate_poly(S, y, y, poly_parity, samples))
+            )
+        else:
+            estimate += self._estimate_poly(S, x, y, poly_parity, samples)
 
         return estimate
 

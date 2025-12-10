@@ -1,12 +1,13 @@
 import numpy as np
 from sampling import NoiseModel
 from util import generate_noise_flips
-from solver import KrylovSolver, StationarySolver
+from solver import KrylovSolver, StationarySolver, EigenfilteringSolver
 from tqdm import tqdm
 import itertools
 
 
-tries = 1000
+# tries = 1000
+tries = 40
 error_percentile = 95
 kappa = 10
 dim = 128
@@ -102,17 +103,26 @@ def run_test_for_solver(solver_class, params_solver):
 #         # "poly_kind": ["qsvt"],
 #     },
 # )
+# run_test_for_solver(
+#     KrylovSolver,
+#     {
+#         "steps": np.arange(1, 13),
+#         # "poly_kind": ["monomial", "chebyshev"],
+#         "poly_kind": ["chebyshev"],
+#         "default_samples": np.array([10000]),
+#         "loss_type": ["cg", "minres"],
+#         "inf_constraint": [False, True],
+#         "transform_method": [None, "square"],
+#         # "use_qsp_for_qoi": [False, True],
+#         "use_qsp_for_qoi": [True],
+#     },
+# )
 run_test_for_solver(
-    KrylovSolver,
+    EigenfilteringSolver,
     {
-        "steps": np.arange(1, 13),
-        # "poly_kind": ["monomial", "chebyshev"],
+        "steps": np.arange(11, 13),
         "poly_kind": ["chebyshev"],
-        "default_samples": np.array([10000]),
-        "loss_type": ["cg", "minres"],
-        "inf_constraint": [False, True],
-        "transform_method": [None, "square"],
-        # "use_qsp_for_qoi": [False, True],
+        "default_samples": np.array([np.inf]),
         "use_qsp_for_qoi": [True],
     },
 )

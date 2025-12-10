@@ -2,6 +2,7 @@ import numpy as np
 import scipy as sp
 from scipy.optimize import minimize
 import sys
+from util import characteristic_poly
 
 
 class Solver:
@@ -10,10 +11,12 @@ class Solver:
         default_samples=10000,
         eval_method="chebyshev",
         transform_method=None,
+        project_to_b=False,
     ):
         self.eval_method = eval_method
         self.transform_method = transform_method
         self.default_samples = default_samples
+        self.project_to_b = project_to_b
 
     def evaluate(self, A, poly):
         X = np.polynomial.Polynomial([0, 1]).convert(kind=poly.__class__)
@@ -24,6 +27,7 @@ class Solver:
                 poly,
                 self.default_samples,
                 qoi=True,
+                project_to_b=self.project_to_b,
                 root=self.transform_method == "square",
                 poly_normalized=False,
             )
@@ -45,6 +49,7 @@ class Solver:
                     poly_kind([0] * i + [1]),
                     self.default_samples,
                     qoi=True,
+                    project_to_b=self.project_to_b,
                     root=self.transform_method == "square",
                     poly_normalized=True,
                 )
@@ -72,6 +77,93 @@ class Solver:
             plt.plot(xs, poly(xs))
         plt.plot(xs, 1 / xs, "--")
         plt.ylim([-11, 11])
+
+        plt.show()
+
+
+class EigenfilteringSolver(Solver):
+    def __init__(
+        self,
+        steps=3,
+        poly_kind="chebyshev",
+        default_samples=10000,
+        use_qsp_for_qoi=False,
+    ):
+        eval_method = "qsp" if use_qsp_for_qoi else poly_kind
+        super().__init__(
+            default_samples, eval_method, transform_method=None, project_to_b=True
+        )
+        self.steps = steps
+        if poly_kind == "monomial":
+            self.poly_kind = np.polynomial.Polynomial
+        elif poly_kind == "chebyshev":
+            self.poly_kind = np.polynomial.Chebyshev
+        else:
+            raise NotImplementedError
+
+    def compute_moments(self, A):
+        """
+        Estimate moments of the form b^T p(A) b (if qoi = False)
+        or m^T p(A) b (if qoi = True)
+        """
+
+        max_degree = None
+        max_degree = 2 * self.steps + 1
+        even = 1
+
+        moments = np.zeros(max_degree + 1)
+        for i in range(0, max_degree + 1, even):
+            moments[i] = A.estimate_poly(
+                self.poly_kind([0] * i + [1]),
+                self.default_samples,
+                poly_normalized=True,
+            )
+
+        return moments
+
+    def precompute(self):
+        X = np.polynomial.Polynomial([0, 1]).convert(kind=self.poly_kind)
+
+        max_degree = None
+        max_degree = 2 * self.steps + 1
+
+        self.poly_G = np.zeros((self.steps + 1, self.steps + 1, max_degree + 1))
+        self.poly_M = np.zeros(
+            (self.steps + 1, self.steps + 1, max_degree)
+        )  # The inner product in the Krylov space
+        self.poly_r = np.zeros((self.steps + 1, max_degree + 1))
+        for i in range(self.steps + 1):
+            poly_i = self.poly_kind([0] * i + [1])
+            self.poly_r[i, : poly_i.degree() + 1] = poly_i.coef
+            for j in range(self.steps + 1):
+                poly_j = self.poly_kind([0] * j + [1])
+                poly_G = X * poly_i * poly_j
+                poly_M = poly_i * poly_j
+                self.poly_G[i, j, : poly_G.degree() + 1] = poly_G.coef
+                self.poly_M[i, j, : poly_M.degree() + 1] = poly_M.coef
+
+    def compute_polynomial(self, A):
+        moments = self.compute_moments(A)
+
+        G = self.poly_G @ moments
+        M = self.poly_M @ moments[:-1]
+
+        # C = np.linalg.cholesky(M, upper=True)
+        # C_inv = np.linalg.inv(C)
+        # M_inv = np.linalg.inv(M)
+        U, S, V = np.linalg.svd(M)
+
+        A = U.T @ G @ V.T / S
+        P = characteristic_poly(A)
+        # print(S)
+        P /= P(0)
+
+        # Compute norm of the solution from moments
+        r = self.poly_r @ moments
+        c = np.linalg.solve(G, r)
+        norm_x_sq = c.T @ M @ c
+
+        return P * np.sqrt(norm_x_sq)
 
 
 class KrylovSolver(Solver):
