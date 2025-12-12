@@ -7,7 +7,6 @@ import git
 import os.path
 
 
-
 class Runner:
     def __init__(
         self, params_problem, tries=1000, error_percentile=95, kappa=10, dim=128
@@ -21,7 +20,8 @@ class Runner:
         )
         self.commit_hash = repo.head.object.hexsha
 
-        global_rng = np.random.default_rng(0)
+        seed_sequence = np.random.SeedSequence(0)
+        global_rng = np.random.default_rng(seed_sequence.spawn(1)[0])
 
         self.params_problem_names = list(params_problem.keys())
         params_problem = list(
@@ -45,13 +45,13 @@ class Runner:
             (tries, noise_flips_per_problem, 2 * dim, 2 * dim)
         )
 
-        rngs = global_rng.spawn(tries)
+        seeds = seed_sequence.spawn(tries)
         self.problems = [
             (
                 params,
                 [
-                    NoiseModel(rng, equation[0], equation[1], nf, kappa, **params)
-                    for (rng, equation, nf) in zip(rngs, equations, noise_flips)
+                    NoiseModel(seed, equation[0], equation[1], nf, kappa, **params)
+                    for (seed, equation, nf) in zip(seeds, equations, noise_flips)
                 ],
             )
             for params in params_problem
@@ -89,7 +89,7 @@ class Runner:
                     avg_complexity = 0
                     errors = []
                     for A in subproblems:
-                        A.reset_profiling()
+                        A.reset()
                         reference = A.reference_solution()
                         solution = solver.solve(A)
                         error = np.abs(reference - solution)

@@ -7,7 +7,7 @@ from symqsp import compute_angles
 class NoiseModel:
     def __init__(
         self,
-        rng,
+        seed: np.random.SeedSequence,
         b,
         m,
         noise_flips,
@@ -23,7 +23,7 @@ class NoiseModel:
         """
         self.kappa = kappa
 
-        self.rng = rng
+        [self.general_rng_seed, self.noise_rng_seed] = seed.spawn(2)
 
         n = b.shape[0]
         self.S = np.linspace(1 / kappa, 1, n)
@@ -34,10 +34,15 @@ class NoiseModel:
 
         self.noise = noise
         self.noise_flips = noise_flips
-        self.reset_profiling()
+        self.reset()
 
-    def reset_profiling(self):
+    def reset(self):
         self.calls = 0
+        # There are two different generators, to make sure that the total amount
+        # of noise for two runs is the same if they use the same number of
+        # applications of A and the same number of samples
+        self.general_rng = np.random.default_rng(self.general_rng_seed)
+        self.noise_rng = np.random.default_rng(self.noise_rng_seed)
 
     def complexity(self):
         return self.calls
@@ -85,7 +90,6 @@ class NoiseModel:
         return estimate
 
     def _estimate_poly(self, S, x, y, poly, samples):
-
         # Resulting state
         result = poly(S) * x
 
@@ -138,9 +142,13 @@ class NoiseModel:
                 S * backward_xs[-i] + S_sqrt * backward_xs[-i, ::-1, :]
             )
 
+        # The specific use of noise_rng makes sure that the total sequence of
+        # numbers generated using poisson are the same for each separate reset
         noise_events = (
             poisson.rvs(
-                self.noise, size=samples * (len(angles) - 1), random_state=self.rng
+                self.noise,
+                size=samples * (len(angles) - 1),
+                random_state=self.noise_rng,
             )
             .reshape((samples, -1))
             .astype(np.uint8)
@@ -157,12 +165,12 @@ class NoiseModel:
             np.abs(np.dot(forward_xs[-1].reshape(-1), backward_xs[-1].reshape(-1)).real)
             ** 2
         )
-        result = self.rng.binomial(np.sum(noiseless), min(1, probability))
+        result = self.general_rng.binomial(np.sum(noiseless), min(1, probability))
 
         # case b) can be computed from the forward and backward xs
         if one_noise.shape[0] > 0:
             noise_timings = np.nonzero(one_noise)[1] + 1
-            flip_indices = self.rng.integers(
+            flip_indices = self.general_rng.integers(
                 0, len(self.noise_flips), size=one_noise.shape[0]
             )
             flips = self.noise_flips[flip_indices]
@@ -179,7 +187,7 @@ class NoiseModel:
                 ** 2
             )
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
-            result += np.sum(self.rng.binomial(1, noisy_probabilities[:]))
+            result += np.sum(self.general_rng.binomial(1, noisy_probabilities[:]))
 
         # case c) more than one noise. We actually simulate each run
         if more_noise.shape[0] > 0:
@@ -192,7 +200,7 @@ class NoiseModel:
                 for j in range(max_flips):
                     should_flip = more_noise[:, i] < j
                     flip_xs = xs[should_flip]
-                    flip_indices = self.rng.integers(
+                    flip_indices = self.general_rng.integers(
                         0, len(self.noise_flips), size=flip_xs.shape[0]
                     )
                     np.matvec(
@@ -206,7 +214,7 @@ class NoiseModel:
 
             noisy_probabilities = np.abs(np.dot(xs[:, 0], y).real) ** 2
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
-            result += np.sum(self.rng.binomial(1, noisy_probabilities[:]))
+            result += np.sum(self.general_rng.binomial(1, noisy_probabilities[:]))
 
         return result
 
