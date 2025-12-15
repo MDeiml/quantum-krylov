@@ -1,0 +1,4 @@
+main.py
+results
+__pycache__
+*.slurm
