@@ -74,7 +74,10 @@ class NoiseModel:
         result = []
         for subpoly in polys:
             if np.allclose(subpoly.coef, np.array([0] * subpoly.degree() + [1])):
-                angles = np.zeros(subpoly.degree() + 1)
+                angles = np.pi * np.ones(subpoly.degree() + 1)
+                if subpoly.degree() % 2 == 0:
+                    angles[0] = -np.pi/2
+                    angles[-1] = -np.pi/2
                 normalization = 1
             else:
                 normalization = sup_norm(subpoly) * 1.01
@@ -135,7 +138,9 @@ class NoiseModel:
         angle_sequences = self.compute_angles(poly)
 
         result = 0
+        print("---")
         for subpoly, angles, normalization in angle_sequences:
+            print(normalization, angles)
             # Resulting state
             exact_result = np.dot(self.b, subpoly(S) * self.b)
 
@@ -150,6 +155,7 @@ class NoiseModel:
 
             # Simulate sampling
             noisy_probabilities = np.linalg.norm(one_amplitude, axis=1) ** 2
+            np.testing.assert_allclose(np.average(1 - 2 * noisy_probabilities), exact_result)
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
             ones = np.sum(
                 self.general_rng.binomial(1, noisy_probabilities[1:])

@@ -8,10 +8,8 @@ class Solver:
     def __init__(
         self,
         default_samples=10000,
-        eval_method="chebyshev",
         transform_method=None,
     ):
-        self.eval_method = eval_method
         self.transform_method = transform_method
         self.default_samples = default_samples
 
@@ -19,38 +17,12 @@ class Solver:
         X = np.polynomial.Polynomial([0, 1]).convert(kind=poly.__class__)
         if self.transform_method == "square":
             poly = poly(X * X)
-        if self.eval_method == "qsp":
-            return A.estimate_poly(
-                poly,
-                self.default_samples,
-                qoi=True,
-                root=self.transform_method == "square",
-                poly_normalized=False,
-            )
-        elif self.eval_method in ["chebyshev", "monomial"]:
-            if self.eval_method == "chebyshev":
-                poly_kind = np.polynomial.Chebyshev
-            else:
-                poly_kind = np.polynomial.Polynomial
-
-            poly = poly.convert(kind=poly_kind)
-
-            even = 1
-            if self.transform_method == "square":
-                even = 2
-            degree = poly.degree()
-            moments = np.zeros(degree + 1)
-            for i in range(0, degree + 1, even):
-                moments[i] = A.estimate_poly(
-                    poly_kind([0] * i + [1]),
-                    self.default_samples,
-                    qoi=True,
-                    root=self.transform_method == "square",
-                    poly_normalized=True,
-                )
-            return np.dot(poly.coef, moments)
-        else:
-            raise NotImplementedError
+        return A.estimate_poly(
+            poly,
+            self.default_samples,
+            qoi=True,
+            root=self.transform_method == "square",
+        )
 
     def precompute(self):
         pass
@@ -84,10 +56,8 @@ class KrylovSolver(Solver):
         default_samples=10000,
         inf_constraint=False,
         transform_method=None,
-        use_qsp_for_qoi=False,
     ):
-        eval_method = "qsp" if use_qsp_for_qoi else poly_kind
-        super().__init__(default_samples, eval_method, transform_method)
+        super().__init__(default_samples, transform_method)
         self.steps = steps
         if poly_kind == "monomial":
             self.poly_kind = np.polynomial.Polynomial
@@ -114,7 +84,6 @@ class KrylovSolver(Solver):
                 self.poly_kind([0] * i * even + [1]),
                 self.default_samples,
                 root=self.transform_method == "square",
-                poly_normalized=True,
             )
 
         return moments
@@ -137,7 +106,7 @@ class KrylovSolver(Solver):
         max_degree = 2 * self.steps + 1
 
         self.poly_r = np.zeros((self.steps + 1, max_degree + 1))
-        self.poly_G = np.zeros((self.steps + 1, self.steps + 1, max_degree))
+        self.poly_G = np.zeros((self.steps + 1, self.steps + 1, max_degree + 1))
         self.poly_M = np.zeros((self.steps + 1, self.steps + 1, max_degree + 1))
         for i in range(self.steps + 1):
             poly_i = self.poly_kind([0] * i + [1])
@@ -194,6 +163,11 @@ class KrylovSolver(Solver):
                 print(res.message, res, file=sys.stderr)
             self.coefficients = self.L @ res.x
 
+        print(moments)
+        print(M)
+        print(G)
+        print(self.poly_M)
+        print(self.poly_G)
         eigenvalues, eigenvectors = sp.linalg.eigh(M, G)
         weights = eigenvectors[0, :]
         return eigenvalues, weights
@@ -204,11 +178,10 @@ class StationarySolver(Solver):
         self,
         steps=3,
         default_samples=10000,
-        eval_method="qsp",
         transform_method=None,
         poly_kind="qsvt",
     ):
-        super().__init__(default_samples, eval_method, transform_method)
+        super().__init__(default_samples, transform_method)
 
         self.steps = steps
         self.poly_kind = poly_kind

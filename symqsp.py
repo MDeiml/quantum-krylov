@@ -117,3 +117,19 @@ def test(N=8):
         res = simulate_qsp(angles, S, np.ones_like(S))
 
         np.testing.assert_allclose(res, p(S), err_msg=p, atol=1e-8)
+
+
+# for i in range(1, 10):
+#     p = np.polynomial.Chebyshev(i * [0] + [1])
+
+#     # angles = compute_angles(p)
+#     angles = np.pi * np.ones(i + 1)
+#     if i % 2 == 0:
+#         angles[0] = -np.pi/2
+#         angles[-1] = -np.pi/2
+#     print(angles)
+
+#     S = np.linspace(-1, 1)
+#     res = simulate_qsp(angles, S, np.ones_like(S))
+
+#     np.testing.assert_allclose(res, p(S), err_msg=p, atol=1e-8)

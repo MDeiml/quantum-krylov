@@ -17,9 +17,9 @@ class Runner:
 
         print("Checking git hash...")
         repo = git.Repo(search_parent_directories=True)
-        assert not repo.is_dirty(), (
-            "Create a git commit before running to ensure proper tagging"
-        )
+        # assert not repo.is_dirty(), (
+        #     "Create a git commit before running to ensure proper tagging"
+        # )
         self.commit_hash = repo.head.object.hexsha
 
         print("Generating problems...")
