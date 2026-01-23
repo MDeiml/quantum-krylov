@@ -55,11 +55,12 @@ class Solver:
     def precompute(self):
         pass
 
-    def compute_polynomial(self, A):
+    def estimate_eigenvalues(self, A) -> (np.ndarray, np.ndarray):
         raise NotImplementedError
 
-    def solve(self, A):
-        return self.evaluate(A, self.compute_polynomial(A))
+    def compute_polynomial(self, A):
+        evs, weights = self.estimate_eigenvalues(A)
+        return np.polynomial.Chebyshev.fit(evs, 1/evs, weights)
 
     def plot(self, A):
         import matplotlib.pyplot as plt
@@ -71,6 +72,7 @@ class Solver:
         else:
             plt.plot(xs, poly(xs))
         plt.plot(xs, 1 / xs, "--")
+        plt.axvline(x=1/A.kappa)
         plt.ylim([-11, 11])
 
 
@@ -80,7 +82,6 @@ class KrylovSolver(Solver):
         steps=3,
         poly_kind="chebyshev",
         default_samples=10000,
-        loss_type="cg",
         inf_constraint=False,
         transform_method=None,
         use_qsp_for_qoi=False,
@@ -94,7 +95,6 @@ class KrylovSolver(Solver):
             self.poly_kind = np.polynomial.Chebyshev
         else:
             raise NotImplementedError
-        self.loss_type = loss_type
         self.inf_constraint = inf_constraint
 
     def compute_moments(self, A):
@@ -103,22 +103,15 @@ class KrylovSolver(Solver):
         or m^T p(A) b (if qoi = True)
         """
 
-        max_degree = None
-        if self.loss_type == "cg":
-            max_degree = 2 * self.steps + 1
-        elif self.loss_type == "minres":
-            max_degree = 2 * self.steps + 2
-        else:
-            raise NotImplementedError
+        max_degree = 2 * self.steps + 1
         even = 1
         if self.transform_method == "square":
-            max_degree *= 2
             even = 2
 
         moments = np.zeros(max_degree + 1)
         for i in range(0, max_degree + 1, even):
             moments[i] = A.estimate_poly(
-                self.poly_kind([0] * i + [1]),
+                self.poly_kind([0] * i * even + [1]),
                 self.default_samples,
                 root=self.transform_method == "square",
                 poly_normalized=True,
@@ -141,45 +134,30 @@ class KrylovSolver(Solver):
     def precompute(self):
         X = np.polynomial.Polynomial([0, 1]).convert(kind=self.poly_kind)
 
-        max_degree = None
-        if self.loss_type == "cg":
-            max_degree = 2 * self.steps + 1
-        elif self.loss_type == "minres":
-            max_degree = 2 * self.steps + 2
-        else:
-            raise NotImplementedError
-        if self.transform_method == "square":
-            max_degree *= 2
+        max_degree = 2 * self.steps + 1
 
         self.poly_r = np.zeros((self.steps + 1, max_degree + 1))
-        self.poly_G = np.zeros((self.steps + 1, self.steps + 1, max_degree + 1))
+        self.poly_G = np.zeros((self.steps + 1, self.steps + 1, max_degree))
+        self.poly_M = np.zeros((self.steps + 1, self.steps + 1, max_degree + 1))
         for i in range(self.steps + 1):
             poly_i = self.poly_kind([0] * i + [1])
-            if self.loss_type == "cg":
-                poly_r = poly_i
-            elif self.loss_type == "minres":
-                poly_r = X * poly_i
-            else:
-                raise NotImplementedError
-            if self.transform_method == "square":
-                poly_r = poly_r(X * X)
-            self.poly_r[i, : poly_r.degree() + 1] = poly_r.coef
 
             for j in range(self.steps + 1):
                 poly_j = self.poly_kind([0] * j + [1])
-                if self.loss_type == "cg":
-                    poly_G = X * poly_i * poly_j
-                elif self.loss_type == "minres":
-                    poly_G = X * X * poly_i * poly_j
-                else:
-                    raise NotImplementedError
+                poly_G = poly_i * poly_j
+                poly_M = X * poly_G
                 if self.transform_method == "square":
                     poly_G = poly_G(X * X)
-                self.poly_G[i, j, : poly_G.degree() + 1] = poly_G.coef
+                    poly_M = poly_M(X * X)
+                    self.poly_G[i, j, : poly_G.degree() + 1] = poly_G.coef[::2]
+                    self.poly_M[i, j, : poly_M.degree() + 1] = poly_M.coef[::2]
+                else:
+                    self.poly_G[i, j, : poly_G.degree() + 1] = poly_G.coef
+                    self.poly_M[i, j, : poly_M.degree() + 1] = poly_M.coef
 
         # Compute coefficients
         if self.inf_constraint:
-            legendre_to_basis = np.zeros((self.steps + 1, self.steps + 1))
+            lagrange_to_basis = np.zeros((self.steps + 1, self.steps + 1))
             X = np.polynomial.Chebyshev([0, 1])
             cheb2 = np.polynomial.Chebyshev([0] * self.steps + [1]).deriv() * (
                 1 - X * X
@@ -187,24 +165,22 @@ class KrylovSolver(Solver):
             cheb_nodes = np.cos(np.arange(self.steps + 1) / self.steps * np.pi)
             for i in range(self.steps + 1):
                 assert cheb2(cheb_nodes[i]) < 1e-10
-                legendre = cheb2 // (cheb_nodes[i] - X)
-                legendre /= legendre(cheb_nodes[i])
-                legendre = legendre.convert(kind=self.poly_kind)
-                legendre_to_basis[:, i] = legendre.coef
+                lagrange = cheb2 // (cheb_nodes[i] - X)
+                lagrange /= lagrange(cheb_nodes[i])
+                lagrange = lagrange.convert(kind=self.poly_kind)
+                lagrange_to_basis[:, i] = lagrange.coef
 
-            self.L = legendre_to_basis
+            self.L = lagrange_to_basis
 
-    def compute_polynomial(self, A):
+    def estimate_eigenvalues(self, A):
         moments = self.compute_moments(A)
 
         # Compute lhs matrix and rhs vector
-        r = self.poly_r @ moments
         G = self.poly_G @ moments
-        # G = np.zeros((self.steps + 1, self.steps + 1))
-        # r = np.zeros(self.steps + 1)
+        M = self.poly_M @ moments
 
-        # Compute coefficients
         if self.inf_constraint:
+            raise NotImplementedError
             hess = self.L.T @ G @ self.L
             # TODO: How to estimate this
             bound = A.kappa
@@ -217,10 +193,10 @@ class KrylovSolver(Solver):
             if not res.success:
                 print(res.message, res, file=sys.stderr)
             self.coefficients = self.L @ res.x
-        else:
-            self.coefficients = np.linalg.solve(G, r)
 
-        return self.poly_kind(self.coefficients)
+        eigenvalues, eigenvectors = sp.linalg.eigh(M, G)
+        weights = eigenvectors[0, :]
+        return eigenvalues, weights
 
 
 class StationarySolver(Solver):
@@ -241,8 +217,8 @@ class StationarySolver(Solver):
         if self.poly_kind == "qsvt":
             coefficients = np.zeros(2 * self.steps + 2)
 
-            # TODO: What to do with the extra factor (log(kappa/tol))
-            b = int(np.ceil(A.kappa**2))
+            # TODO: Is there a better way to estimate the correct factor instead of 2?
+            b = int(np.ceil(A.kappa**2 * 2))
             b = max(b, self.steps)
 
             for j in range(self.steps + 1):

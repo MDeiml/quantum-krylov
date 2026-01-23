@@ -14,12 +14,15 @@ class Runner:
         self.tries = tries
         self.error_percentile = error_percentile
         self.dim = dim
+
+        print("Checking git hash...")
         repo = git.Repo(search_parent_directories=True)
         assert not repo.is_dirty(), (
             "Create a git commit before running to ensure proper tagging"
         )
         self.commit_hash = repo.head.object.hexsha
 
+        print("Generating problems...")
         seed_sequence = np.random.SeedSequence(0)
         global_rng = np.random.default_rng(seed_sequence.spawn(1)[0])
 
@@ -30,12 +33,12 @@ class Runner:
         )
 
         # Generate bs and ms
-        equations = global_rng.normal(size=tries * dim * 2).reshape((tries * 2, dim))
+        equations = global_rng.normal(size=tries * dim).reshape((tries, dim))
         for i in range(equations.shape[0]):
             norm = np.linalg.norm(equations[i])
             assert norm > 1e-4
             equations[i] /= norm
-        equations = equations.reshape((tries, 2, dim))
+        equations = equations.reshape((tries, dim))
 
         noise_flips_per_problem = 20
         noise_flips = generate_noise_flips(
@@ -50,7 +53,7 @@ class Runner:
             (
                 params,
                 [
-                    NoiseModel(seed, equation[0], equation[1], nf, kappa, **params)
+                    NoiseModel(seed, equation, nf, kappa, **params)
                     for (seed, equation, nf) in zip(seeds, equations, noise_flips)
                 ],
             )
@@ -90,9 +93,12 @@ class Runner:
                     errors = []
                     for A in subproblems:
                         A.reset()
-                        reference = A.reference_solution()
-                        solution = solver.solve(A)
-                        error = np.abs(reference - solution)
+                        poly = solver.compute_polynomial(A)
+                        error = A.estimate_error(
+                            poly,
+                            params["default_samples"],
+                            params["transform_method"] == "square",
+                        )
                         errors.append(error)
                         avg_complexity += A.complexity() / self.tries
                     res = (
