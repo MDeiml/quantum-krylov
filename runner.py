@@ -87,7 +87,6 @@ class Runner:
                 iter, total=total, desc=f"Testing {solver_class.__name__}"
             ):
                 solver = solver_class(**params)
-                solver.precompute()
                 for problem_params, subproblems in self.problems:
                     avg_complexity = 0
                     errors = []

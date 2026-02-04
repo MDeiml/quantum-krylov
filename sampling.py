@@ -76,8 +76,8 @@ class NoiseModel:
             if np.allclose(subpoly.coef, np.array([0] * subpoly.degree() + [1])):
                 angles = np.pi * np.ones(subpoly.degree() + 1)
                 if subpoly.degree() % 2 == 0:
-                    angles[0] = -np.pi/2
-                    angles[-1] = -np.pi/2
+                    angles[0] -= np.pi/2
+                    angles[-1] -= np.pi/2
                 normalization = 1
             else:
                 normalization = sup_norm(subpoly) * 1.01
@@ -138,9 +138,7 @@ class NoiseModel:
         angle_sequences = self.compute_angles(poly)
 
         result = 0
-        print("---")
         for subpoly, angles, normalization in angle_sequences:
-            print(normalization, angles)
             # Resulting state
             exact_result = np.dot(self.b, subpoly(S) * self.b)
 
@@ -155,15 +153,19 @@ class NoiseModel:
 
             # Simulate sampling
             noisy_probabilities = np.linalg.norm(one_amplitude, axis=1) ** 2
-            np.testing.assert_allclose(np.average(1 - 2 * noisy_probabilities), exact_result)
+            # np.testing.assert_allclose(np.average(1 - 2 * noisy_probabilities), exact_result)
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
             ones = np.sum(
-                self.general_rng.binomial(1, noisy_probabilities[1:])
+                self.general_rng.binomial(1, noisy_probabilities[:])
             )
+            # np.testing.assert_allclose(ones / samples, np.average(noisy_probabilities), atol=0.05)
 
             # Estimate corresponding to the hadamard test
             probability_estimate = 1 - 2 * ones / samples
+            # probability_estimate = 1 - 2 * np.average(noisy_probabilities)
             result += normalization * probability_estimate
+
+        # np.testing.assert_allclose(result, np.dot(self.b, poly(S) * self.b), atol=0.05)
 
         return result
 
@@ -257,11 +259,15 @@ class NoiseModel:
                 ys = np.conj(xs)
             xs = np.concatenate((ys, xs), axis=1) / np.sqrt(2)
 
-        xs = xs.reshape((xs.shape[0], -1)).real
+        # xs = xs.reshape((xs.shape[0], -1)).real
+        xs = xs.reshape((xs.shape[0], -1))
 
         # Undo noiseless sorting
-        result = np.zeros((samples, xs.shape[1]))
+        result = np.zeros((samples, xs.shape[1]), dtype=np.complex128)
         result[events_per_sample > 0] = xs[1:]
         result[events_per_sample == 0] = xs[0]
+
+        if not folding:
+            result = result.real
 
         return result

@@ -22,3 +22,15 @@ def sup_norm(poly):
     extrema = np.concatenate((extrema, [-1, 1]))
 
     return np.max(np.abs(poly(extrema)))
+
+
+def maximal_x(poly, a, b):
+    """
+    Computes the point with the largest absolute value in [a, b]
+    """
+
+    extrema = poly.deriv().roots()
+    extrema = extrema[np.logical_and(extrema > a, extrema < b)]
+    extrema = np.concatenate((extrema, [a, b]))
+
+    return extrema[np.argmax(np.abs(poly(extrema)))]
