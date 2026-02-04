@@ -65,7 +65,6 @@ class NoiseModel:
         poly_parity = np.polynomial.Chebyshev(coefs_parity)
         polys = [poly_parity]
         if not is_parity:
-            # TODO: Consider this and folding is complexity counting
             coefs_non_parity = poly.coef[:-1].copy()
             coefs_non_parity[parity::2] = 0
             poly_non_parity = np.polynomial.Chebyshev(coefs_non_parity)
@@ -96,29 +95,45 @@ class NoiseModel:
         return result
 
     def estimate_error(self, poly, samples, root=False):
-        self.calls += poly.degree() * samples
         S = self.S
         if root:
             S = np.sqrt(self.S)
 
+        exact_solution = self.b / self.S
+        exact_solution_norm = np.linalg.norm(exact_solution)
         if np.isinf(samples):
-            return np.linalg.norm(poly(S) * self.b - self.b / self.S)
+            self.calls = np.inf
+            return abs(exact_solution_norm ** 2 - np.dot(poly(S) * self.b, exact_solution / exact_solution_norm) ** 2) / exact_solution_norm ** 2
 
         angle_sequences = self.compute_angles(poly)
-
         results = np.zeros((samples, self.b.shape[0]))
         total_normalization = 0
+
+        # Simulate LCU
+        self.calls += poly.degree() * samples
         for subpoly, angles, normalization in angle_sequences:
+            if root:
+                assert subpoly.degree() % 2 == 0, "Can only evaluate even polynomials for squareroot of matrix"
+
             states = self.simulate_qsvt(S, angles, samples, folding=False)
 
-            subresult = states[:, :self.b.shape[0]]
-            results += normalization * subresult
+            results += states[:, :self.b.shape[0]] * normalization
             total_normalization += normalization
 
-        diff = np.average(results, axis=0) - self.b / self.S
+        # We assume that the quantity of interest is x @ x.T, since this will yield
+        # the highest error
+        # Simulate sampling
+        noisy_probabilities = np.dot(results / total_normalization, exact_solution / exact_solution_norm) ** 2
+        noisy_probabilities = np.minimum(noisy_probabilities, 1)
+        ones = np.sum(
+            self.general_rng.binomial(1, noisy_probabilities[:])
+        )
 
-        # TODO: This is not the correct error measure
-        return np.linalg.norm(diff) / np.linalg.norm(self.b / self.S) # + total_normalization / np.sqrt(samples)
+        # Estimate corresponding to standard Monte Carlo
+        probability_estimate = ones / samples
+        qoi = total_normalization ** 2 * probability_estimate
+
+        return abs(qoi - exact_solution_norm ** 2) / exact_solution_norm ** 2
 
     def estimate_poly(self, poly, samples, root=False):
         """
@@ -129,21 +144,22 @@ class NoiseModel:
         :param root: If True, compute poly(sqrt(A)) instead
         """
 
-        # TODO: Also consider applications of b so that samples = inf makes sense
-        self.calls += poly.degree() * samples
         S = self.S
         if root:
             S = np.sqrt(self.S)
+
+        # TODO: Also consider applications of b so that samples = inf makes sense
+        if np.isinf(samples):
+            self.calls = np.inf
+            return np.dot(self.b, poly(S) * self.b)
 
         angle_sequences = self.compute_angles(poly)
 
         result = 0
         for subpoly, angles, normalization in angle_sequences:
-            # Resulting state
-            exact_result = np.dot(self.b, subpoly(S) * self.b)
-
-            if np.isinf(samples):
-                return normalization * exact_result
+            if root:
+                assert subpoly.degree() % 2 == 0, "Can only evaluate even polynomials for squareroot of matrix"
+            self.calls += (subpoly.degree() + 1) // 2
 
             states = self.simulate_qsvt(S, angles, samples, folding=True)
             dim = self.b.shape[0]
@@ -162,7 +178,6 @@ class NoiseModel:
 
             # Estimate corresponding to the hadamard test
             probability_estimate = 1 - 2 * ones / samples
-            # probability_estimate = 1 - 2 * np.average(noisy_probabilities)
             result += normalization * probability_estimate
 
         # np.testing.assert_allclose(result, np.dot(self.b, poly(S) * self.b), atol=0.05)
@@ -259,7 +274,6 @@ class NoiseModel:
                 ys = np.conj(xs)
             xs = np.concatenate((ys, xs), axis=1) / np.sqrt(2)
 
-        # xs = xs.reshape((xs.shape[0], -1)).real
         xs = xs.reshape((xs.shape[0], -1))
 
         # Undo noiseless sorting

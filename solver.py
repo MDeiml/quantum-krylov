@@ -2,9 +2,6 @@ from functools import cached_property
 
 import numpy as np
 import scipy as sp
-from scipy.optimize import minimize
-import sys
-from util import maximal_x
 
 
 class Solver:
@@ -46,9 +43,7 @@ class KrylovSolver(Solver):
         self,
         steps=3,
         poly_kind="chebyshev",
-        gram_moments=False,
         default_samples=10000,
-        inf_constraint=False,
         transform_method=None,
     ):
         super().__init__(default_samples, transform_method)
@@ -59,7 +54,6 @@ class KrylovSolver(Solver):
             self.poly_kind = np.polynomial.Chebyshev
         else:
             raise NotImplementedError
-        self.inf_constraint = inf_constraint
 
     @cached_property
     def moment_basis(self):
@@ -115,113 +109,58 @@ class KrylovSolver(Solver):
     def moment_to_gram(self):
         X = np.polynomial.Chebyshev([0, 1])
 
-        mat_G = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
-        mat_M = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
+        mat_G0 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
+        mat_G1 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
         for i in range(self.steps + 1):
             poly_i = np.polynomial.Chebyshev([0] * i + [1])
 
             for j in range(self.steps + 1):
                 poly_j = np.polynomial.Chebyshev([0] * j + [1])
-                poly_G = poly_i * poly_j
-                poly_M = X * poly_G
+                poly_G0 = poly_i * poly_j
+                poly_G1 = X * poly_G0
                 if self.transform_method == "square":
-                    poly_G = poly_G(X * X)
-                    poly_M = poly_M(X * X)
-                mat_G[i, j] = (
-                    self.chebyshev_to_moment_basis[:, : poly_G.degree() + 1]
-                    @ poly_G.coef
+                    poly_G0 = poly_G0(X * X)
+                    poly_G1 = poly_G1(X * X)
+                mat_G0[i, j] = (
+                    self.chebyshev_to_moment_basis[:, : poly_G0.degree() + 1]
+                    @ poly_G0.coef
                 )
-                mat_M[i, j] = (
-                    self.chebyshev_to_moment_basis[:, : poly_M.degree() + 1]
-                    @ poly_M.coef
+                mat_G1[i, j] = (
+                    self.chebyshev_to_moment_basis[:, : poly_G1.degree() + 1]
+                    @ poly_G1.coef
                 )
 
-        return mat_G, mat_M
-
-        # # Compute coefficients
-        # if self.inf_constraint:
-        #     lagrange_to_basis = np.zeros((self.steps + 1, self.steps + 1))
-        #     X = np.polynomial.Chebyshev([0, 1])
-        #     cheb2 = np.polynomial.Chebyshev([0] * self.steps + [1]).deriv() * (
-        #         1 - X * X
-        #     )
-        #     cheb_nodes = np.cos(np.arange(self.steps + 1) / self.steps * np.pi)
-        #     for i in range(self.steps + 1):
-        #         assert cheb2(cheb_nodes[i]) < 1e-10
-        #         lagrange = cheb2 // (cheb_nodes[i] - X)
-        #         lagrange /= lagrange(cheb_nodes[i])
-        #         lagrange = lagrange.convert(kind=self.poly_kind)
-        #         lagrange_to_basis[:, i] = lagrange.coef
-
-        #     self.L = lagrange_to_basis
+        return mat_G0, mat_G1
 
     def estimate_eigenvalues(self, A):
         moments = self.compute_moments(A)
 
         # Compute lhs matrix and rhs vector
-        mat_G, mat_M = self.moment_to_gram
-        G = mat_G @ moments
-        M = mat_M @ moments
-
-        # if self.inf_constraint:
-        #     raise NotImplementedError
-        #     hess = self.L.T @ G @ self.L
-        #     # TODO: How to estimate this
-        #     bound = A.kappa
-        #     res = minimize(
-        #         lambda x: 0.5 * np.dot(x, hess @ x) - np.dot(self.L @ x, r),
-        #         np.zeros(self.steps + 1),
-        #         jac=lambda x: hess @ x - self.L.T @ r,
-        #         bounds=[(-bound, bound)] * (self.steps + 1),
-        #     )
-        #     if not res.success:
-        #         print(res.message, res, file=sys.stderr)
-        #     self.coefficients = self.L @ res.x
-
-        # print(moments)
-        # print(M, np.linalg.cond(M))
-        # print(G, np.linalg.cond(G))
-        # print(sp.linalg.eig(G))
-        # print(sp.linalg.eig(M))
-        # print(sp.linalg.eig(M, G))
-        # Ghi = np.linalg.inv(np.linalg.cholesky(G))
-        # X = Ghi.T @ M @ Ghi
-        # print(np.linalg.eigvals(X))
-        # eigenvalues, eigenvectors = sp.linalg.eigh(M, G)
+        mat_G0, mat_G1 = self.moment_to_gram
+        G0 = mat_G0 @ moments
+        G1 = mat_G1 @ moments
 
         # First remove directions corresponding to small eigenvalues of G
-        E_G, V_G = sp.linalg.eigh(G)
-        # print(E_G)
-        E_G_max = np.max(E_G)
-        cutoff_index = np.searchsorted(E_G, E_G_max * 2 / np.sqrt(self.default_samples))
+        E0, V0 = sp.linalg.eigh(G0)
+        E0_max = np.max(E0)
+        cutoff_index = np.searchsorted(E0, E0_max * 2 / np.sqrt(self.default_samples))
 
         # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
         while True:
-            P = np.diag(1 / np.sqrt(E_G[cutoff_index:])) @ V_G[:, cutoff_index:].T
-            MG = P @ M @ P.T
-            eigenvalues, eigenvectors = sp.linalg.eigh(MG)
-            if np.min(eigenvalues) > 0 or cutoff_index == len(E_G) - 1:
+            P = np.diag(1 / np.sqrt(E0[cutoff_index:])) @ V0[:, cutoff_index:].T
+            G = P @ G1 @ P.T
+            eigenvalues, eigenvectors = sp.linalg.eigh(G)
+            if np.min(eigenvalues) > 0 or cutoff_index == len(E0) - 1:
                 break
             cutoff_index += 1
 
-        # print(eigenvalues)
-        weights = eigenvectors[0, :]
-        print(eigenvalues)
-        return eigenvalues.real, weights.real
+        return eigenvalues
 
     def compute_polynomial(self, A):
-        evs, weights = self.estimate_eigenvalues(A)
+        evs = self.estimate_eigenvalues(A)
         poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
-        # np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, w=weights)
 
         X = np.polynomial.Chebyshev([0, 1])
-
-        # while poly.degree() < self.steps:
-        #     new_x = maximal_x(poly * X - 1, np.min(evs), np.max(evs))
-        #     evs = np.concatenate((evs, [new_x]))
-        #     poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1,1])
-
-        print(poly)
 
         if self.transform_method == "square":
             poly = poly(X * X)
