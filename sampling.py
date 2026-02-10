@@ -75,8 +75,8 @@ class NoiseModel:
             if np.allclose(subpoly.coef, np.array([0] * subpoly.degree() + [1])):
                 angles = np.pi * np.ones(subpoly.degree() + 1)
                 if subpoly.degree() % 2 == 0:
-                    angles[0] -= np.pi/2
-                    angles[-1] -= np.pi/2
+                    angles[0] -= np.pi / 2
+                    angles[-1] -= np.pi / 2
                 normalization = 1
             else:
                 normalization = sup_norm(subpoly) * 1.01
@@ -103,7 +103,14 @@ class NoiseModel:
         exact_solution_norm = np.linalg.norm(exact_solution)
         if np.isinf(samples):
             self.calls = np.inf
-            return abs(exact_solution_norm ** 2 - np.dot(poly(S) * self.b, exact_solution / exact_solution_norm) ** 2) / exact_solution_norm ** 2
+            return (
+                abs(
+                    exact_solution_norm**2
+                    - np.dot(poly(S) * self.b, exact_solution / exact_solution_norm)
+                    ** 2
+                )
+                / exact_solution_norm**2
+            )
 
         angle_sequences = self.compute_angles(poly)
         results = np.zeros((samples, self.b.shape[0]))
@@ -113,27 +120,61 @@ class NoiseModel:
         self.calls += poly.degree() * samples
         for subpoly, angles, normalization in angle_sequences:
             if root:
-                assert subpoly.degree() % 2 == 0, "Can only evaluate even polynomials for squareroot of matrix"
+                assert subpoly.degree() % 2 == 0, (
+                    "Can only evaluate even polynomials for squareroot of matrix"
+                )
 
             states = self.simulate_qsvt(S, angles, samples, folding=False)
 
-            results += states[:, :self.b.shape[0]] * normalization
+            results += states[:, : self.b.shape[0]] * normalization
             total_normalization += normalization
 
-        # We assume that the quantity of interest is x @ x.T, since this will yield
-        # the highest error
+        # Find the quantity of interest that maximizes the error
+        approximation = np.average(results, axis=0)
+        if (
+            np.dot(approximation, exact_solution)
+            / exact_solution_norm
+            / np.linalg.norm(approximation)
+            < 1e-6
+        ):
+            # The error is in the direction of the exact_solution
+            measurement = (
+                np.outer(exact_solution, exact_solution) / exact_solution_norm**2
+            )
+        else:
+            # Find the two dimensional subspace that contains both exact solution and approximation
+            transform_basis, _ = np.linalg.qr(np.array([exact_solution, approximation]).T)
+            error_matrix = (
+                transform_basis.T
+                @ (
+                    np.outer(exact_solution, exact_solution)
+                    - np.outer(approximation, approximation)
+                )
+                @ transform_basis
+            )
+            eigval, eigvec = np.linalg.eig(error_matrix)
+            measurement = (
+                transform_basis
+                @ eigvec
+                @ np.diag(np.sign(eigval))
+                @ eigvec.T
+                @ transform_basis.T
+            )
+
+        approximation = np.average(results, axis=0)
+        qoi_exact = exact_solution.T @ measurement @ exact_solution
+        qoi_simulated = np.sum(results * (results @ measurement), axis=1)
+
         # Simulate sampling
-        noisy_probabilities = np.dot(results / total_normalization, exact_solution / exact_solution_norm) ** 2
+        noisy_probabilities = (1 - qoi_simulated / total_normalization**2) / 2
         noisy_probabilities = np.minimum(noisy_probabilities, 1)
-        ones = np.sum(
-            self.general_rng.binomial(1, noisy_probabilities[:])
-        )
+        ones = np.sum(self.general_rng.binomial(1, noisy_probabilities[:]))
 
         # Estimate corresponding to standard Monte Carlo
-        probability_estimate = ones / samples
-        qoi = total_normalization ** 2 * probability_estimate
+        probability_estimate = 1 - 2 * ones / samples
+        qoi_measured = total_normalization**2 * probability_estimate
 
-        return abs(qoi - exact_solution_norm ** 2) / exact_solution_norm ** 2
+        return abs(qoi_exact - qoi_measured) / exact_solution_norm**2
 
     def estimate_poly(self, poly, samples, root=False):
         """
@@ -158,7 +199,9 @@ class NoiseModel:
         result = 0
         for subpoly, angles, normalization in angle_sequences:
             if root:
-                assert subpoly.degree() % 2 == 0, "Can only evaluate even polynomials for squareroot of matrix"
+                assert subpoly.degree() % 2 == 0, (
+                    "Can only evaluate even polynomials for squareroot of matrix"
+                )
             self.calls += (subpoly.degree() + 1) // 2
 
             states = self.simulate_qsvt(S, angles, samples, folding=True)
@@ -171,9 +214,7 @@ class NoiseModel:
             noisy_probabilities = np.linalg.norm(one_amplitude, axis=1) ** 2
             # np.testing.assert_allclose(np.average(1 - 2 * noisy_probabilities), exact_result)
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
-            ones = np.sum(
-                self.general_rng.binomial(1, noisy_probabilities[:])
-            )
+            ones = np.sum(self.general_rng.binomial(1, noisy_probabilities[:]))
             # np.testing.assert_allclose(ones / samples, np.average(noisy_probabilities), atol=0.05)
 
             # Estimate corresponding to the hadamard test
@@ -231,7 +272,9 @@ class NoiseModel:
         with_noise = noise_events[events_per_sample > 0]
 
         # Only need to simulate a single run without noise
-        noise_events = np.concatenate((np.zeros((1, duration), dtype=np.uint32), with_noise), axis=0)
+        noise_events = np.concatenate(
+            (np.zeros((1, duration), dtype=np.uint32), with_noise), axis=0
+        )
 
         # xs will be the state for the Hadamard test ancilla being 1
         # ys will be the state for the ancilla being 0

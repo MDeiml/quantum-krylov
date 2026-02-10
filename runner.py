@@ -2,22 +2,9 @@ import numpy as np
 from sampling import NoiseModel
 from util import generate_noise_flips
 from tqdm import tqdm
-from tqdm.contrib.concurrent import process_map
 import itertools
 import git
 import os.path
-
-
-def _process_solver(p):
-    A, solver = p
-    A.reset()
-    poly = solver.compute_polynomial(A)
-    error = A.estimate_error(
-        poly,
-        solver.default_samples,
-        solver.transform_method == "square",
-    )
-    return error, A.complexity()
 
 
 class Runner:
@@ -101,11 +88,25 @@ class Runner:
             ):
                 solver = solver_class(**params)
                 for problem_params, subproblems in self.problems:
-                    errors, complexities = zip(*process_map(_process_solver, zip(subproblems, [solver] * len(subproblems)), disable=True))
+                    errors = []
+                    complexities = []
+                    for A in subproblems:
+                        A.reset()
+                        poly = solver.compute_polynomial(A)
+                        error = A.estimate_error(
+                            poly,
+                            solver.default_samples,
+                            solver.transform_method == "square",
+                        )
+                        errors.append(error)
+                        complexities.append(A.complexity())
                     res = (
                         list(params.values())
                         + list(problem_params.values())
-                        + [np.average(complexities), np.percentile(errors, self.error_percentile)]
+                        + [
+                            np.average(complexities),
+                            np.percentile(errors, self.error_percentile),
+                        ]
                     )
                     f.write(";".join(list(map(str, res))) + ";\n")
                     f.flush()
