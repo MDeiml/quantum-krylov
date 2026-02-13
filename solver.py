@@ -30,7 +30,7 @@ class Solver:
         poly = self.compute_polynomial(A)
         xs = np.linspace(-1, 1, 200)
         if self.transform_method == "square":
-            plt.plot(xs, poly(np.sqrt(xs)))
+            plt.plot(xs, poly(np.abs(xs)))
         else:
             plt.plot(xs, poly(xs))
         plt.plot(xs, 1 / xs, "--")
@@ -54,17 +54,19 @@ class KrylovSolver(Solver):
             self.poly_kind = np.polynomial.Chebyshev
         else:
             raise NotImplementedError
+        self.domain = [0, 1] if transform_method == "square" else [-1, 1]
 
     @cached_property
     def moment_basis(self):
         max_degree = 2 * self.steps + 1
 
-        if self.transform_method == "square":
-            max_degree *= 2
-        return [
-            self.poly_kind([0] * i + [1]).convert(kind=np.polynomial.Chebyshev)
+        basis = [
+            self.poly_kind([0] * i + [1], domain=self.domain).convert(
+                kind=np.polynomial.Chebyshev, domain=self.domain
+            )
             for i in range(max_degree + 1)
         ]
+        return basis
 
     @cached_property
     def chebyshev_to_moment_basis(self):
@@ -87,16 +89,14 @@ class KrylovSolver(Solver):
         or m^T p(A) b (if qoi = True)
         """
 
+        X = np.polynomial.Chebyshev([0, 1])
+        sq = X * X
+
         moments = np.zeros(len(self.moment_basis))
         for i, poly in enumerate(self.moment_basis):
-            # For transfrom_method == 2 and poly_kind == "chebyshev"
-            # we do not actually need the even degrees
-            if (
-                self.transform_method == "square"
-                and self.poly_kind is np.polynomial.Chebyshev
-                and i % 2 == 1
-            ):
-                continue
+            poly = poly.convert(domain=[-1, 1])
+            if self.transform_method == "square":
+                poly = poly(sq)
             moments[i] = A.estimate_poly(
                 poly,
                 self.default_samples,
@@ -107,20 +107,17 @@ class KrylovSolver(Solver):
 
     @cached_property
     def moment_to_gram(self):
-        X = np.polynomial.Chebyshev([0, 1])
+        X = np.polynomial.Chebyshev([0, 1]).convert(domain=self.domain)
 
         mat_G0 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
         mat_G1 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
         for i in range(self.steps + 1):
-            poly_i = np.polynomial.Chebyshev([0] * i + [1])
+            poly_i = np.polynomial.Chebyshev([0] * i + [1], domain=self.domain)
 
             for j in range(self.steps + 1):
-                poly_j = np.polynomial.Chebyshev([0] * j + [1])
+                poly_j = np.polynomial.Chebyshev([0] * j + [1], domain=self.domain)
                 poly_G0 = poly_i * poly_j
                 poly_G1 = X * poly_G0
-                if self.transform_method == "square":
-                    poly_G0 = poly_G0(X * X)
-                    poly_G1 = poly_G1(X * X)
                 mat_G0[i, j] = (
                     self.chebyshev_to_moment_basis[:, : poly_G0.degree() + 1]
                     @ poly_G0.coef
@@ -141,16 +138,17 @@ class KrylovSolver(Solver):
         G1 = mat_G1 @ moments
 
         # First remove directions corresponding to small eigenvalues of G
+        accuracy = 2 / np.sqrt(self.default_samples)
         E0, V0 = sp.linalg.eigh(G0)
-        E0_max = np.max(E0)
-        cutoff_index = np.searchsorted(E0, E0_max * 2 / np.sqrt(self.default_samples))
+        E0_max = E0[-1]
+        cutoff_index = np.searchsorted(E0, E0_max * accuracy)
 
         # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
         while True:
             P = np.diag(1 / np.sqrt(E0[cutoff_index:])) @ V0[:, cutoff_index:].T
             G = P @ G1 @ P.T
             eigenvalues, eigenvectors = sp.linalg.eigh(G)
-            if np.min(eigenvalues) > 0 or cutoff_index == len(E0) - 1:
+            if np.min(eigenvalues) > accuracy or cutoff_index == len(E0) - 1:
                 break
             cutoff_index += 1
 
@@ -159,11 +157,6 @@ class KrylovSolver(Solver):
     def compute_polynomial(self, A):
         evs = self.estimate_eigenvalues(A)
         poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
-
-        X = np.polynomial.Chebyshev([0, 1])
-
-        if self.transform_method == "square":
-            poly = poly(X * X)
         return poly
 
 
@@ -196,7 +189,7 @@ class StationarySolver(Solver):
             poly = np.polynomial.Chebyshev(coefficients)
         elif self.poly_kind in ["chebyshev_positive", "chebyshev_symmetric"]:
             X = np.polynomial.Chebyshev([0, 1])
-            poly = np.polynomial.Chebyshev([0] * self.steps + [1])
+            poly = np.polynomial.Chebyshev([0] * self.steps + [0, 1])
             poly = poly((X - (1 / A.kappa + 1) / 2) / (1 - 1 / A.kappa) * 2)
             poly = 1 - poly / poly(0)
 

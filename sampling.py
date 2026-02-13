@@ -28,7 +28,6 @@ class NoiseModel:
         self.S = np.linspace(1 / kappa, 1, n)
 
         self.b = b
-        self.solution = self.b / self.S
 
         self.noise = noise
         self.noise_flips = noise_flips
@@ -212,6 +211,7 @@ class NoiseModel:
 
             # Simulate sampling
             noisy_probabilities = np.linalg.norm(one_amplitude, axis=1) ** 2
+            # exact_result = np.dot(self.b, subpoly(S) * self.b)
             # np.testing.assert_allclose(np.average(1 - 2 * noisy_probabilities), exact_result)
             noisy_probabilities = np.minimum(noisy_probabilities, 1)
             ones = np.sum(self.general_rng.binomial(1, noisy_probabilities[:]))
@@ -291,16 +291,15 @@ class NoiseModel:
 
             max_flips = np.max(noise_events[:, i])
             for j in range(max_flips):
-                should_flip = noise_events[:, i] < j
+                should_flip = noise_events[:, i] >= j + 1
                 flip_xs = xs[should_flip]
                 flip_indices = self.general_rng.integers(
                     0, len(self.noise_flips), size=flip_xs.shape[0]
                 )
-                np.matvec(
+                xs[should_flip] = np.matvec(
                     self.noise_flips[flip_indices],
                     flip_xs.reshape((-1, 2 * dim)),
-                    out=flip_xs.reshape((-1, 2 * dim)),
-                )
+                ).reshape(-1, 2, dim)
 
             if folding and i == duration - 1:
                 if uneven:

@@ -93,6 +93,9 @@ class Runner:
                     for A in subproblems:
                         A.reset()
                         poly = solver.compute_polynomial(A)
+                        if solver.transform_method == "square":
+                            X = np.polynomial.Chebyshev([0, 1])
+                            poly = poly(X * X)
                         error = A.estimate_error(
                             poly,
                             solver.default_samples,

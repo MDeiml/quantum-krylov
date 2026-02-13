@@ -12,14 +12,14 @@ def generate_noise_flips(rng, dim, n):
     return random_rotations.swapaxes(-1, -2) @ flipped_rotations
 
 
-def sup_norm(poly):
+def sup_norm(poly, range=(-1.,1.)):
     """
     Computes the sup norm of a polynomial in the range [-1, 1]
     """
 
     extrema = poly.deriv().roots()
-    extrema = extrema[np.logical_and(extrema > -1., extrema < 1.)]
-    extrema = np.concatenate((extrema, [-1, 1]))
+    extrema = extrema[np.logical_and(extrema > range[0], extrema < range[1])]
+    extrema = np.concatenate((extrema, [range[0], range[1]]))
 
     return np.max(np.abs(poly(extrema)))
 
