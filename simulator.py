@@ -92,35 +92,34 @@ class Simulator:
         xs = np.zeros((noise_events.shape[0], 2, dim), dtype=np.complex128)
         xs[:, 0, :dim] = np.exp(angles[0] * 1j) * b
         ys = None
-        for i, angle in enumerate(angles[1 : 1 + duration]):
-            if folding and i == duration - 1 and uneven:
-                # If the polynomial is uneven and the hadard test ancilla is 0,
-                # the final step should only be performed for xs but not ys
-                ys = np.conj(xs)
+        for j in range(xs.shape[0]):
+            for i, angle in enumerate(angles[1 : 1 + duration]):
+                if folding and i == duration - 1 and uneven:
+                    # If the polynomial is uneven and the hadard test ancilla is 0,
+                    # the final step should only be performed for xs but not ys
+                    ys = np.conj(xs)
 
-            xs = S * xs + S_sqrt * xs[:, ::-1, :]
+                xs[j] = S * xs[j] + S_sqrt * xs[j, ::-1, :]
 
-            max_flips = np.max(noise_events[:, i])
-            for j in range(max_flips):
-                should_flip = noise_events[:, i] >= j + 1
-                flip_xs = xs[should_flip]
-                flip_indices = self.general_rng.integers(
-                    0, len(self.noise_flips), size=flip_xs.shape[0]
-                )
-                xs[should_flip] -= 2 * np.conj(np.vecmat(np.matvec(
-                    self.noise_flips[flip_indices],
-                    flip_xs.reshape((-1, 2 * dim)),
-                ), self.noise_flips[flip_indices]).reshape(-1, 2, dim))
+                flips = np.max(noise_events[j, i])
+                for j in range(flips):
+                    flip_index = self.general_rng.integers(
+                        0, len(self.noise_flips)
+                    )
+                    xs[j] -= 2 * np.conj(np.vecmat(np.matvec(
+                        self.noise_flips[flip_index],
+                        xs[j].reshape((2 * dim)),
+                    ), self.noise_flips[flip_index]).reshape((2, dim)))
 
-            if folding and i == duration - 1:
-                if uneven:
-                    pass
+                if folding and i == duration - 1:
+                    if uneven:
+                        pass
+                    else:
+                        xs[j, 0] *= np.exp(angle / 2 * 1j)
+                        xs[j, 1] *= np.exp(-angle / 2 * 1j)
                 else:
-                    xs[:, 0] *= np.exp(angle / 2 * 1j)
-                    xs[:, 1] *= np.exp(-angle / 2 * 1j)
-            else:
-                xs[:, 0] *= np.exp(angle * 1j)
-                xs[:, 1] *= np.exp(-angle * 1j)
+                    xs[j, 0] *= np.exp(angle * 1j)
+                    xs[j, 1] *= np.exp(-angle * 1j)
 
         if folding:
             if not uneven:
