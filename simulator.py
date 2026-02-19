@@ -107,10 +107,10 @@ class Simulator:
                 flip_indices = self.general_rng.integers(
                     0, len(self.noise_flips), size=flip_xs.shape[0]
                 )
-                xs[should_flip] = np.matvec(
+                xs[should_flip] -= 2 * np.conj(np.vecmat(np.matvec(
                     self.noise_flips[flip_indices],
                     flip_xs.reshape((-1, 2 * dim)),
-                ).reshape(-1, 2, dim)
+                ), self.noise_flips[flip_indices]).reshape(-1, 2, dim))
 
             if folding and i == duration - 1:
                 if uneven:
