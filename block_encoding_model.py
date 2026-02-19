@@ -121,7 +121,7 @@ class BlockEncodingModel:
             states_one = (states[:, : 2 * dim] - states[:, 2 * dim :]) / np.sqrt(2)
 
             # Simulate sampling
-            amplitudes_one = np.linalg.norm(states_one, axis=1) ** 2
+            amplitudes_one = np.inner(states_one, states_one)
 
             # Estimate corresponding to the hadamard test
             probability_estimate = 1 - 2 * self.simulator.measure(amplitudes_one)
