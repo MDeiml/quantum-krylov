@@ -200,10 +200,4 @@ class StationarySolver(Solver):
         else:
             raise NotImplementedError
 
-        if self.transform_method == "square":
-            X_sq = np.polynomial.Polynomial([0, 0, 1]).convert(
-                kind=np.polynomial.Chebyshev
-            )
-            poly = poly(X_sq)
-
         return poly
