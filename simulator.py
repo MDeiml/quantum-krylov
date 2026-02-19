@@ -34,7 +34,7 @@ class Simulator:
     def complexity(self):
         return self.calls
 
-    def simulate_qsvt(self, S, b, angles, samples, folding=True):
+    def simulate_qsvt(self, S, b, angles, samples, measurement=None):
         """
         Simulates qsvt with noise.
 
@@ -55,6 +55,8 @@ class Simulator:
         S_sqrt = 1j * np.sqrt(1 - S**2)
 
         dim = b.shape[0]
+
+        folding = measurement is None
 
         if folding:
             duration = len(angles) // 2
@@ -121,6 +123,15 @@ class Simulator:
                     xs[j, 0] *= np.exp(angle * 1j)
                     xs[j, 1] *= np.exp(-angle * 1j)
 
+            if folding:
+                pass
+            weight = (samples - noise_events.shape[0] + 1) if j == 0 else 1
+            max_amplitude = np.max(np.abs(amplitudes))
+            assert max_amplitude - 1 < 1e-4, (
+                f"maximum amplitude {max_amplitude} is not between -1 and 1"
+            )
+            probabilities = np.minimum(1, amplitudes**2)
+            np.sum(self.general_rng.binomial(weight, probabilities))
         if folding:
             if not uneven:
                 ys = np.conj(xs)
