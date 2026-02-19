@@ -1,5 +1,6 @@
 import numpy as np
 import scipy as sp
+from util import sup_norm
 
 
 def interpolation_points(reduced_degree, parity):
@@ -55,7 +56,7 @@ def DF(reduced_phases, parity, xs):
     return value, derivative
 
 
-def compute_angles(poly):
+def compute_angles_internal(poly):
     degree = poly.degree()
     reduced_degree = int(np.ceil((degree + 1) / 2))
     parity = degree % 2
@@ -83,53 +84,51 @@ def compute_angles(poly):
     return full_phases
 
 
-def simulate_qsp(angles, S, x):
-    x = x.astype(np.complex128)
-    x_bad = np.zeros_like(x, dtype=np.complex128)
-    x *= np.exp(angles[0] * 1j)
-    x_bad *= np.exp(-angles[0] * 1j)
-    for angle in angles[1:]:
-        x, x_bad = (
-            S * x + 1j * np.sqrt(1 - S**2) * x_bad,
-            1j * np.sqrt(1 - S**2) * x + S * x_bad,
-        )
-        x *= np.exp(angle * 1j)
-        x_bad *= np.exp(-angle * 1j)
+def compute_angles(poly):
+    """
+    Computes angles for given polynomial
 
-    return x.real
+    This takes into account the parity and normalization of the polynomial.
+    It returns a list of one (if the polynomial has definite partiy) or two
+    tuples. The first element of the tuples is an angle sequence for QSVT
+    and the second element is the corresponding weight, such that the sum of
+    QSVT polynomials equals the input to this function.
+    """
+    poly = poly.convert(kind=np.polynomial.Chebyshev)
 
+    parity = poly.degree() % 2
+    is_parity = np.allclose(poly.coef[(1 - parity) :: 2], 0, atol=1e-6)
 
-def test(N=8):
-    from util import sup_norm
+    coefs_parity = poly.coef.copy()
+    coefs_parity[1 - parity :: 2] = 0
+    poly_parity = np.polynomial.Chebyshev(coefs_parity)
+    polys = [poly_parity]
+    if not is_parity:
+        coefs_non_parity = poly.coef[:-1].copy()
+        coefs_non_parity[parity::2] = 0
+        poly_non_parity = np.polynomial.Chebyshev(coefs_non_parity)
+        polys.append(poly_non_parity)
 
-    for i in range(1000):
-        parity = np.random.randint(0, 2)
-        coef = np.zeros(2 * N + parity)
-        coef[parity::2] = np.random.randn(N)
-        p = np.polynomial.Chebyshev(coef)
-        p /= sup_norm(p) * 1.01
+    result = []
+    for subpoly in polys:
+        if np.allclose(subpoly.coef, np.array([0] * subpoly.degree() + [1])):
+            angles = np.pi * np.ones(subpoly.degree() + 1)
+            if subpoly.degree() % 2 == 0:
+                angles[0] -= np.pi / 2
+                angles[-1] -= np.pi / 2
+            normalization = 1
+        else:
+            normalization = sup_norm(subpoly) * 1.01
+            angles = None
+            max_tries = 100
+            for _ in range(max_tries):
+                angles = compute_angles_internal(subpoly / normalization)
+                if angles is not None:
+                    break
+                normalization *= 1.01
+            if angles is None:
+                raise RuntimeError(f"Could not compute angles for {subpoly}")
 
-        angles = compute_angles(p)
-        if angles is None:
-            print(p)
+        result.append((subpoly / normalization, angles, normalization))
 
-        S = np.linspace(-1, 1)
-        res = simulate_qsp(angles, S, np.ones_like(S))
-
-        np.testing.assert_allclose(res, p(S), err_msg=p, atol=1e-8)
-
-
-# for i in range(1, 10):
-#     p = np.polynomial.Chebyshev(i * [0] + [1])
-
-#     # angles = compute_angles(p)
-#     angles = np.pi * np.ones(i + 1)
-#     if i % 2 == 0:
-#         angles[0] = -np.pi/2
-#         angles[-1] = -np.pi/2
-#     print(angles)
-
-#     S = np.linspace(-1, 1)
-#     res = simulate_qsp(angles, S, np.ones_like(S))
-
-#     np.testing.assert_allclose(res, p(S), err_msg=p, atol=1e-8)
+    return result

@@ -1,5 +1,5 @@
 import numpy as np
-from sampling import NoiseModel
+from block_encoding_model import BlockEncodingModel
 from util import generate_noise_flips
 from tqdm import tqdm
 import itertools
@@ -53,7 +53,7 @@ class Runner:
             (
                 params,
                 [
-                    NoiseModel(seed, equation, nf, kappa, **params)
+                    BlockEncodingModel(seed, equation, nf, kappa, **params)
                     for (seed, equation, nf) in zip(seeds, equations, noise_flips)
                 ],
             )

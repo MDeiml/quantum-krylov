@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sampling import NoiseModel
+from simulator import NoiseModel
 from solver import KrylovSolver, StationarySolver
 from util import generate_noise_flips
 
