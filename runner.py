@@ -45,7 +45,7 @@ class Runner:
             global_rng, dim, tries * noise_flips_per_problem
         )
         noise_flips = noise_flips.reshape(
-            (tries, noise_flips_per_problem, dim, 2 * dim)
+            (tries, noise_flips_per_problem, 2 * dim, 2 * dim)
         )
 
         seeds = seed_sequence.spawn(tries)

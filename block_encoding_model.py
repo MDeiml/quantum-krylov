@@ -71,7 +71,7 @@ class BlockEncodingModel:
 
             states = self.simulator.simulate_qsvt(S, self.b, angles, samples, folding=False)
 
-            results += states[:, : self.b.shape[0]] * normalization
+            results += states[:, : self.b.shape[0]].real * normalization
             total_normalization += normalization
 
         # Find the quantity of interest that maximizes the error
@@ -121,7 +121,7 @@ class BlockEncodingModel:
             states_one = (states[:, : 2 * dim] - states[:, 2 * dim :]) / np.sqrt(2)
 
             # Simulate sampling
-            probabilities_one = np.vecdot(states_one, states_one)
+            probabilities_one = np.vecdot(states_one, states_one).real
 
             # Estimate corresponding to the hadamard test
             probability_estimate = 1 - 2 * self.simulator.measure(probabilities_one)
