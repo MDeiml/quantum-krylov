@@ -78,11 +78,11 @@ class BlockEncodingModel:
         approximation = np.average(results, axis=0)
         measurement = measurement_max_error(exact_solution, approximation)
         qoi_exact = exact_solution.T @ measurement @ exact_solution
-        qoi_simulated = np.sum(results * (results @ measurement), axis=1)
+        qoi_simulated = np.vecdot(results, results @ measurement)
 
         # Simulate sampling
         noisy_probabilities = (1 - qoi_simulated / total_normalization**2) / 2
-        probability_estimate = 1 - 2 * self.simulator.measure(np.sqrt(noisy_probabilities))
+        probability_estimate = 1 - 2 * self.simulator.measure(noisy_probabilities)
         qoi_measured = total_normalization**2 * probability_estimate
 
         return abs(qoi_exact - qoi_measured) / exact_solution_norm**2
@@ -121,10 +121,10 @@ class BlockEncodingModel:
             states_one = (states[:, : 2 * dim] - states[:, 2 * dim :]) / np.sqrt(2)
 
             # Simulate sampling
-            amplitudes_one = np.inner(states_one, states_one)
+            probabilities_one = np.vecdot(states_one, states_one)
 
             # Estimate corresponding to the hadamard test
-            probability_estimate = 1 - 2 * self.simulator.measure(amplitudes_one)
+            probability_estimate = 1 - 2 * self.simulator.measure(probabilities_one)
             result += normalization * probability_estimate
 
         return result

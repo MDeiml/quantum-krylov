@@ -138,10 +138,11 @@ class Simulator:
 
         return result
 
-    def measure(self, amplitudes):
-        max_amplitude = np.max(np.abs(amplitudes))
-        assert max_amplitude - 1 < 1e-4, (
-            f"maximum amplitude {max_amplitude} is not between -1 and 1"
+    def measure(self, probabilities):
+        max_probability = np.max(probabilities)
+        min_probability = np.min(probabilities)
+        assert min_probability > 0 and max_probability - 1 < 1e-4, (
+            f"probabilities [{min_probability}, {max_probability} are not between 0 and 1"
         )
-        probabilities = np.minimum(1, amplitudes**2)
+        probabilities = np.minimum(1, probabilities)
         return np.average(self.general_rng.binomial(1, probabilities))
