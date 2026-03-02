@@ -129,6 +129,11 @@ def compute_angles(poly):
             if angles is None:
                 raise RuntimeError(f"Could not compute angles for {subpoly}")
 
+        # Convert angles to Rx convention
+        angles[:] -= np.pi / 2
+        angles[0] += len(angles) * np.pi / 4
+        angles[-1] += len(angles) * np.pi / 4
+
         result.append((subpoly / normalization, angles, normalization))
 
     return result

@@ -14,9 +14,11 @@ class AdaptiveSolver(Solver):
         poly_kind="chebyshev",
         default_samples=10000,
         transform_method=None,
+        sup_norm_constraint=False,
     ):
         super().__init__(default_samples, transform_method)
         self.steps = steps
+        self.sup_norm_constraint = sup_norm_constraint
         if poly_kind == "monomial":
             self.poly_kind = np.polynomial.Polynomial
         elif poly_kind == "chebyshev":
@@ -51,6 +53,29 @@ class AdaptiveSolver(Solver):
                 for poly in self.moment_basis
             ]
         ).T
+
+    @cached_property
+    def lagrange_basis(self):
+        X = np.polynomial.Chebyshev([0, 1])
+
+        # Number of basis functions
+        N = self.steps + 1
+
+        # Polynomial with roots at all interpolation points
+        full_poly = (
+            np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
+        )
+
+        basis = []
+        for k in range(N):
+            # k-th chebyshev node of the second kind
+            xk = np.cos(k / (N - 1) * np.pi)
+            poly = full_poly // (X - xk)
+            poly /= poly(xk)
+            # Map to domain
+            basis.append(np.polynomial.Chebyshev(poly.coef, domain=self.domain))
+
+        return basis
 
     def compute_moments(self, A: BlockEncodingModel):
         """
@@ -125,5 +150,37 @@ class AdaptiveSolver(Solver):
 
     def compute_polynomial(self, A: BlockEncodingModel):
         evs = self.estimate_eigenvalues(A)
-        poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
-        return poly
+
+        if not self.sup_norm_constraint:
+            poly = np.polynomial.Chebyshev.fit(
+                evs, 1 / evs, len(evs) - 1, domain=[-1, 1]
+            )
+            return poly
+
+        lagrange_at_evs = np.zeros((len(evs), self.steps + 1))
+        for i, poly in enumerate(self.lagrange_basis):
+            lagrange_at_evs[:, i] = poly(evs)
+
+        hess = lagrange_at_evs.T @ lagrange_at_evs
+        c = lagrange_at_evs.T @ (1 / evs)
+
+        def f(coef):
+            return 0.5 * coef.T @ hess @ coef - c.T @ coef
+
+        def Df(coef):
+            return hess @ coef - c
+
+        # We do not want to keep the bound exactly
+        relaxation_factor = 1.2
+        # Account for evs being negative, which should only happen very seldomly
+        min_ev = max(np.min(evs), 0.001)
+        bound = relaxation_factor / min_ev
+
+        res = sp.optimize.minimize(
+            f,
+            np.zeros(self.steps + 1),
+            jac=Df,
+            bounds=[(-bound, bound)] * (self.steps + 1),
+        )
+
+        return sum([res.x[i] * self.lagrange_basis[i] for i in range(self.steps + 1)])

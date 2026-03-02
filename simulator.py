@@ -1,5 +1,4 @@
 import numpy as np
-import line_profiler
 
 
 class Simulator:
@@ -34,8 +33,31 @@ class Simulator:
     def complexity(self):
         return self.calls
 
-    @line_profiler.profile
-    def simulate_qsvt(self, S, b, angles, samples, folding=True):
+    def simulate_qsvt_folding(self, S, b, angles, samples, test=None):
+        def measurement(x, temp):
+            # a = (x[:, 0, :, :] - x[:, 1, :, :]) / np.sqrt(2)
+            # a.shape = (x.shape[0], -1)
+            # return 1 - 2 * np.vecdot(a, a)
+            x = x.reshape((x.shape[0], 2, -1))
+            return 2 * np.vecdot(x[:, 0], x[:, 1])
+
+        even = len(angles) % 2 == 1
+        if even:
+            angles_new = angles[: (len(angles) + 1) // 2].copy()
+            angles_new[-1] /= 2
+            angle_sequences = [angles_new, -angles_new]
+        else:
+            angle_sequences = [
+                angles[: len(angles) // 2],
+                -np.concatenate((angles[: len(angles) // 2], [0])),
+            ]
+        return self.simulate_qsvt(
+            S, b, angle_sequences, samples, measurement, test=test
+        )
+
+    def simulate_qsvt(
+        self, S, b, angle_sequences, samples, measurement, weights=None, test=None
+    ):
         """
         Simulates qsvt with noise.
 
@@ -53,19 +75,11 @@ class Simulator:
         the polynomial. Each state has dimension ``dim * 2``, where the relavant
         part is the first half.
         """
-        S_sqrt = 1j * np.sqrt(1 - S**2)
+        S_sqrt = np.sqrt(1 - S**2)
 
         dim = b.shape[0]
-
-        if folding:
-            duration = len(angles) // 2
-        else:
-            duration = len(angles) - 1
+        duration = max([len(angles) - 1 for angles in angle_sequences])
         self.calls += duration * samples
-
-        # This is really correct:
-        # the polynomial is even, if the number of angles is odd
-        uneven = len(angles) % 2 == 0
 
         # The specific use of noise_rng makes sure that the total sequence of
         # numbers generated using binomial are the same for each separate reset.
@@ -90,76 +104,98 @@ class Simulator:
         )
 
         # Precompute phases
-        phases = angles[: duration + 1].copy()
-        if folding:
-            if uneven:
-                phases[duration] = 0
-            else:
-                phases[duration] /= 2
+        phases = np.zeros((len(angle_sequences), duration + 1))
+        for i, angles in enumerate(angle_sequences):
+            phases[i, : len(angles)] = angles
         phases = np.exp(phases * 1j)
 
-        # xs will be the state for the Hadamard test ancilla being 1
-        # ys will be the state for the ancilla being 0
-        xs = np.zeros((noise_events.shape[0], 2, dim), dtype=np.complex64)
-        ys = np.zeros_like(xs) if folding and uneven else None
-        xs[:, 0, :] = np.exp(angles[0] * 1j) * b
-        xs[:, 1, :] = 0
-
         batch_size = 16
+        xs = np.zeros((batch_size, len(angle_sequences), 2, dim), dtype=np.complex64)
+        temp = np.zeros_like(xs)
 
-        temp = np.zeros((batch_size, 2, dim), dtype=np.complex64)
-
-        for j in range(int(np.ceil(xs.shape[0] / batch_size))):
+        result = 0
+        for j in range(int(np.ceil(noise_events.shape[0] / batch_size))):
+            # Setup initial state corresponding to LCU
             batch_start = j * batch_size
-            batch_end = min((j + 1) * batch_size, xs.shape[0])
-            batch = xs[batch_start:batch_end]
-            temp_batch = temp[:batch_end - batch_start]
-            for i, phase in enumerate(phases[1:]):
-                if folding and i == duration - 1 and uneven:
-                    # If the polynomial is uneven and the hadard test ancilla is 0,
-                    # the final step should only be performed for xs but not ys
-                    ys[batch_start:batch_end] = np.conj(xs[batch_start:batch_end])
+            batch_end = min((j + 1) * batch_size, noise_events.shape[0])
+            batch = xs[: batch_end - batch_start]
+            temp_batch = temp[: batch_end - batch_start]
+            for i, angles in enumerate(angle_sequences):
+                factor = (
+                    weights[i]
+                    if weights is not None
+                    else 1 / np.sqrt(len(angle_sequences))
+                )
+                batch[:, i, 0, :] = factor * phases[i, 0] * b
+            batch[:, :, 1, :] = 0
+            for i in range(duration):
+                # In the final step, the unitary is performed controlled on wether
+                # this polynomial has the same partiy as the longest polynomial
+                if i == duration - 1:
+                    for k, angles in enumerate(angle_sequences):
+                        if (len(angles) - 1) % 2 == duration % 2:
+                            # For non-folding case, apply the last unitary if the
+                            # polynomial has the same partiy as the longest polynomial
 
-                # This corresponds to
-                # x = S * x + S_sqrt * x[::-1, :]
-                np.multiply(S_sqrt, batch[:, ::-1, :], out=temp_batch)
-                np.multiply(S, batch, out=batch)
-                batch += temp_batch
+                            np.multiply(
+                                S_sqrt, batch[:, k, ::-1, :], out=temp_batch[:, 0]
+                            )
+                            batch[:, k] *= S
+                            batch[:, k, 1] *= -1
+                            batch[:, k] += temp_batch[:, 0]
+                else:
+                    np.multiply(S_sqrt, batch[:, :, ::-1, :], out=temp_batch)
+                    batch *= S
+                    batch[:, :, 1] *= -1
+                    batch += temp_batch
 
                 flip_index = self.general_rng.integers(
                     0, len(self.noise_flips), size=batch.shape[0]
                 )
                 for k in range(batch.shape[0]):
                     if noise_events[batch_start + k, i] != 0:
-                        temp_batch[k] = 0
-                    else:
                         flip = self.noise_flips[flip_index[k]]
-                        np.matvec(
+                        # For some reason matvec does not work here
+                        np.einsum(
+                            "...ij,...j",
                             flip,
-                            batch[k].reshape(2 * dim),
-                            out=batch[k].reshape(2 * dim),
+                            batch[k].reshape(-1, 2 * dim),
+                            out=batch[k].reshape(-1, 2 * dim)[:],
                         )
 
-        if folding:
-            if uneven:
-                xs = np.concatenate((ys, xs), axis=1) / np.sqrt(2)
-            else:
-                xs = np.concatenate((xs, xs), axis=1) / np.sqrt(2)
+                batch[:, :, 0, :] *= phases[:, i + 1, np.newaxis]
+                batch[:, :, 1, :] /= phases[:, i + 1, np.newaxis]
 
-        xs = xs.reshape((xs.shape[0], -1))
+            # Check that squared amplitudes sum up to 1
+            shape = (batch.shape[0], -1)
+            np.testing.assert_allclose(
+                np.vecdot(batch.reshape(shape), batch.reshape(shape)), 1, rtol=1e-5
+            )
 
-        # Undo noiseless sorting
-        result = np.zeros((samples, xs.shape[1]), dtype=np.complex64)
-        result[events_per_sample > 0] = xs[1:]
-        result[events_per_sample == 0] = xs[0]
+            # Hadamard test
+            measurements = measurement(batch, temp_batch).real
+            assert measurements.shape == (batch.shape[0],)
+            probabilities = (1 - measurements) / 2
+            if j == 0:
+                if test is not None:
+                    # Check that noiseless simulation is correct
+                    np.testing.assert_allclose(measurements[0], test, atol=1e-5)
+                # Noiseless run happens multiple times
+                result += self.measure(
+                    probabilities[0], samples - noise_events.shape[0] - 1
+                )
+                probabilities = probabilities[1:]
+            result += self.measure(probabilities)
 
-        return result
+        return 1 - 2 * result / samples
 
-    def measure(self, probabilities):
+    def measure(self, probabilities, samples=1):
+        if probabilities.ndim > 0 and probabilities.shape[0] == 0:
+            return 0
         max_probability = np.max(probabilities)
         min_probability = np.min(probabilities)
         assert min_probability >= 0 and max_probability - 1 < 1e-4, (
             f"probabilities [{min_probability}, {max_probability}] are not between 0 and 1"
         )
-        probabilities = np.minimum(1, probabilities)
-        return np.average(self.general_rng.binomial(1, probabilities))
+        probabilities = np.minimum(samples, probabilities)
+        return np.sum(self.general_rng.binomial(samples, probabilities))

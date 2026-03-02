@@ -47,43 +47,57 @@ class BlockEncodingModel:
 
         exact_solution = self.b / self.S
         exact_solution_norm = np.linalg.norm(exact_solution)
-        if np.isinf(samples):
-            self.simulator.calls = np.inf
-            return (
-                abs(
-                    exact_solution_norm**2
-                    - np.dot(poly(S) * self.b, exact_solution / exact_solution_norm)
-                    ** 2
-                )
-                / exact_solution_norm**2
-            )
-
-        angle_sequences = compute_angles(poly)
-        results = np.zeros((samples, self.b.shape[0]))
-        total_normalization = 0
-
-        # Simulate LCU
-        for subpoly, angles, normalization in angle_sequences:
-            if root:
-                assert subpoly.degree() % 2 == 0, (
-                    "Can only evaluate even polynomials for squareroot of matrix"
-                )
-
-            states = self.simulator.simulate_qsvt(S, self.b, angles, samples, folding=False)
-
-            results += states[:, : self.b.shape[0]].real * normalization
-            total_normalization += normalization
 
         # Find the quantity of interest that maximizes the error
-        approximation = np.average(results, axis=0)
+        approximation = poly(S) * self.b
         measurement = measurement_max_error(exact_solution, approximation)
         qoi_exact = exact_solution.T @ measurement @ exact_solution
-        qoi_simulated = np.vecdot(results, results @ measurement)
+        qoi_approximation = approximation.T @ measurement @ approximation
 
-        # Simulate sampling
-        noisy_probabilities = (1 - qoi_simulated / total_normalization**2) / 2
-        probability_estimate = 1 - 2 * self.simulator.measure(noisy_probabilities)
-        qoi_measured = total_normalization**2 * probability_estimate
+        if np.isinf(samples):
+            self.simulator.calls = np.inf
+            return abs(qoi_exact - qoi_approximation) / exact_solution_norm**2
+
+        # If the polynomial is zero, we can conlude that the result must be
+        # zero without using the quantum computer
+        if np.allclose(poly.coef, 0, atol=1e-6):
+            return abs(qoi_exact) / exact_solution_norm
+
+        angle_sequences = compute_angles(poly)
+
+        if root:
+            assert all(
+                [subpoly.degree() % 2 == 0 for subpoly, _, _ in angle_sequences]
+            ), "Can only evaluate even polynomials for squareroot of matrix"
+
+        total_normalization = sum(
+            [normalization for _, _, normalization in angle_sequences]
+        )
+
+        weights = [
+            np.sqrt(normalization / total_normalization)
+            for _, _, normalization in angle_sequences
+        ]
+
+        def measure(x, temp):
+            x = x[:, :, 0, :]
+            for i, weight in enumerate(weights):
+                x[:, i, :] *= weight
+            np.sum(x[:, :, :], axis=1, out=x[:, 0, :])
+            x = x[:, 0, :]
+            np.matvec(measurement, x, out=temp[:, 0, 0, :])
+            return np.vecdot(x.real, temp[:, 0, 0, :].real)
+
+        results = self.simulator.simulate_qsvt(
+            S,
+            self.b,
+            [angles for _, angles, _ in angle_sequences],
+            samples,
+            measure,
+            weights=weights,
+            test=qoi_approximation / total_normalization**2,
+        )
+        qoi_measured = total_normalization**2 * results
 
         return abs(qoi_exact - qoi_measured) / exact_solution_norm**2
 
@@ -100,31 +114,25 @@ class BlockEncodingModel:
         if root:
             S = np.sqrt(self.S)
 
+        exact = np.dot(self.b, poly(S) * self.b)
         # TODO: Also consider applications of b so that samples = inf makes sense
         if np.isinf(samples):
             self.simulator.calls = np.inf
-            return np.dot(self.b, poly(S) * self.b)
+            return exact
 
         angle_sequences = compute_angles(poly)
 
+        assert len(angle_sequences) == 1, "not implemented"
+
         result = 0
-        for subpoly, angles, normalization in angle_sequences:
-            if root:
-                assert subpoly.degree() % 2 == 0, (
-                    "Can only evaluate even polynomials for squareroot of matrix"
-                )
+        subpoly, angles, normalization = angle_sequences[0]
+        if root:
+            assert subpoly.degree() % 2 == 0, (
+                "Can only evaluate even polynomials for squareroot of matrix"
+            )
 
-            states = self.simulator.simulate_qsvt(S, self.b, angles, samples, folding=True)
-            dim = self.b.shape[0]
+        result = self.simulator.simulate_qsvt_folding(
+            S, self.b, angles, samples, test=exact / normalization
+        )
 
-            # Simulate final hadamard
-            states_one = (states[:, : 2 * dim] - states[:, 2 * dim :]) / np.sqrt(2)
-
-            # Simulate sampling
-            probabilities_one = np.vecdot(states_one, states_one).real
-
-            # Estimate corresponding to the hadamard test
-            probability_estimate = 1 - 2 * self.simulator.measure(probabilities_one)
-            result += normalization * probability_estimate
-
-        return result
+        return normalization * result

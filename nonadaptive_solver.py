@@ -19,6 +19,9 @@ class NonadaptiveSolver(Solver):
         self.poly_kind = poly_kind
 
     def compute_polynomial(self, A: BlockEncodingModel):
+        X = np.polynomial.Chebyshev([0, 1])
+        sq = X * X
+
         if self.poly_kind == "qsvt":
             coefficients = np.zeros(2 * self.steps + 2)
 
@@ -33,16 +36,18 @@ class NonadaptiveSolver(Solver):
 
             poly = np.polynomial.Chebyshev(coefficients)
         elif self.poly_kind in ["chebyshev_positive", "chebyshev_symmetric"]:
-            X = np.polynomial.Chebyshev([0, 1])
             poly = np.polynomial.Chebyshev([0] * self.steps + [0, 1])
             poly = poly((X - (1 / A.kappa + 1) / 2) / (1 - 1 / A.kappa) * 2)
             poly = 1 - poly / poly(0)
 
             if self.poly_kind == "chebyshev_symmetric":
-                poly = poly(X * X)
+                poly = poly(sq)
 
             poly = poly // X
         else:
             raise NotImplementedError
+
+        if self.transform_method == "square":
+            poly = poly(sq)
 
         return poly

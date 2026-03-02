@@ -9,18 +9,28 @@ import os.path
 
 class Runner:
     def __init__(
-        self, params_problem, tries=1000, error_percentile=95, kappa=10, dim=128
+        self,
+        params_problem,
+        tries=1000,
+        error_percentile=95,
+        condition=10,
+        dim=128,
+        enforce_git_commit=True,
     ):
         self.tries = tries
         self.error_percentile = error_percentile
         self.dim = dim
+        self.condition = condition
 
         print("Checking git hash...")
         repo = git.Repo(search_parent_directories=True)
-        assert not repo.is_dirty(), (
-            "Create a git commit before running to ensure proper tagging"
-        )
+        if enforce_git_commit:
+            assert not repo.is_dirty(), (
+                "Create a git commit before running to ensure proper tagging"
+            )
         self.commit_hash = repo.head.object.hexsha
+        if repo.is_dirty():
+            self.commit_hash += "_modified"
 
         print("Generating problems...")
         seed_sequence = np.random.SeedSequence(0)
@@ -53,7 +63,7 @@ class Runner:
             (
                 params,
                 [
-                    BlockEncodingModel(seed, equation, nf, kappa, **params)
+                    BlockEncodingModel(seed, equation, nf, condition, **params)
                     for (seed, equation, nf) in zip(seeds, equations, noise_flips)
                 ],
             )
@@ -78,7 +88,7 @@ class Runner:
         with open(filename, "a") as f:
             if was_created:
                 f.write(
-                    ";".join(params_solver_names + self.params_problem_names)
+                    ";condition;".join(params_solver_names + self.params_problem_names)
                     + f";complexity;error {self.error_percentile} percentile;\n"
                 )
                 f.flush()
@@ -105,6 +115,7 @@ class Runner:
                         complexities.append(A.complexity())
                     res = (
                         list(params.values())
+                        + [self.condition]
                         + list(problem_params.values())
                         + [
                             np.average(complexities),

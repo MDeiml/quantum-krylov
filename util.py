@@ -5,11 +5,12 @@ from scipy.stats import unitary_group
 def generate_noise_flips(rng, dim, n):
     # Simulate one ancilla bit
     # TODO: Should this be more?
-    random_rotations = unitary_group.rvs(dim * 2, n, rng)
+    random_rotations = unitary_group.rvs(dim * 2, n, rng).astype(np.complex64)
     flipped_rotations = np.concatenate(
         (random_rotations[:, dim:, :], random_rotations[:, :dim, :]), axis=1
     )
     return np.conj(random_rotations.swapaxes(-1, -2)) @ flipped_rotations
+
 
 def sup_norm(poly, range=(-1.0, 1.0)):
     """
