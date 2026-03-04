@@ -12,13 +12,13 @@ class Runner:
         self,
         params_problem,
         tries=1000,
-        error_percentile=95,
+        error_percentiles=[0, 5, 50, 95, 100],
         condition=10,
         dim=128,
         enforce_git_commit=True,
     ):
         self.tries = tries
-        self.error_percentile = error_percentile
+        self.error_percentiles = error_percentiles
         self.dim = dim
         self.condition = condition
 
@@ -88,8 +88,14 @@ class Runner:
         with open(filename, "a") as f:
             if was_created:
                 f.write(
-                    ";condition;".join(params_solver_names + self.params_problem_names)
-                    + f";complexity;error {self.error_percentile} percentile;\n"
+                    ";".join(
+                        params_solver_names
+                        + ["condition"]
+                        + self.params_problem_names
+                        + ["complexity"]
+                        + [f"error {p} percentile" for p in self.error_percentiles]
+                    )
+                    + ";\n"
                 )
                 f.flush()
 
@@ -117,10 +123,8 @@ class Runner:
                         list(params.values())
                         + [self.condition]
                         + list(problem_params.values())
-                        + [
-                            np.average(complexities),
-                            np.percentile(errors, self.error_percentile),
-                        ]
+                        + [np.average(complexities)]
+                        + [np.percentile(errors, p) for p in self.error_percentiles]
                     )
                     f.write(";".join(list(map(str, res))) + ";\n")
                     f.flush()
