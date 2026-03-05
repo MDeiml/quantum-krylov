@@ -132,7 +132,7 @@ class AdaptiveSolver(Solver):
         G1 = mat_G1 @ moments
 
         # First remove directions corresponding to small eigenvalues of G
-        accuracy = 2 / np.sqrt(self.default_samples)
+        accuracy = 1 / np.sqrt(self.default_samples)
         E0, V0 = sp.linalg.eigh(G0)
         E0_max = E0[-1]
         cutoff_index = np.searchsorted(E0, E0_max * accuracy)

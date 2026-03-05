@@ -37,7 +37,10 @@ class NonadaptiveSolver(Solver):
             poly = np.polynomial.Chebyshev(coefficients)
         elif self.poly_kind in ["chebyshev_positive", "chebyshev_symmetric"]:
             poly = np.polynomial.Chebyshev([0] * self.steps + [0, 1])
-            poly = poly((X - (1 / A.kappa + 1) / 2) / (1 - 1 / A.kappa) * 2)
+            kappa = A.kappa
+            if self.poly_kind == "chebyshev_symmetric":
+                kappa = kappa ** 2
+            poly = poly((X - (1 / kappa + 1) / 2) / (1 - 1 / kappa) * 2)
             poly = 1 - poly / poly(0)
 
             if self.poly_kind == "chebyshev_symmetric":
@@ -46,8 +49,5 @@ class NonadaptiveSolver(Solver):
             poly = poly // X
         else:
             raise NotImplementedError
-
-        if self.transform_method == "square":
-            poly = poly(sq)
 
         return poly

@@ -83,7 +83,7 @@ class Runner:
             total *= len(param)
 
         filename = f"results/{solver_class.__name__}_{self.commit_hash}.csv"
-        was_created = not os.path.isfile("filename")
+        was_created = not os.path.isfile(filename)
 
         with open(filename, "a") as f:
             if was_created:
