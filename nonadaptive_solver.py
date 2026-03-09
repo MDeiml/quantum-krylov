@@ -25,8 +25,8 @@ class NonadaptiveSolver(Solver):
         if self.poly_kind == "qsvt":
             coefficients = np.zeros(2 * self.steps + 2)
 
-            # TODO: Is there a better way to estimate the correct factor instead of 2?
-            b = int(np.ceil(A.kappa**2 * 2))
+            accuracy = 2 / np.sqrt(self.default_samples)
+            b = int(np.ceil(A.kappa**2 * np.log(A.kappa / accuracy)))
             b = max(b, self.steps)
 
             for j in range(self.steps + 1):
