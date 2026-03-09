@@ -15,10 +15,12 @@ class AdaptiveSolver(Solver):
         default_samples=10000,
         transform_method=None,
         sup_norm_constraint=False,
+        use_kappa=False,
     ):
         super().__init__(default_samples, transform_method)
         self.steps = steps
         self.sup_norm_constraint = sup_norm_constraint
+        self.use_kappa = use_kappa
         if poly_kind == "monomial":
             self.poly_kind = np.polynomial.Polynomial
         elif poly_kind == "chebyshev":
@@ -132,17 +134,20 @@ class AdaptiveSolver(Solver):
         G1 = mat_G1 @ moments
 
         # First remove directions corresponding to small eigenvalues of G
-        accuracy = 1 / np.sqrt(self.default_samples)
+        accuracy = 2 / np.sqrt(self.default_samples)
         E0, V0 = sp.linalg.eigh(G0)
         E0_max = E0[-1]
         cutoff_index = np.searchsorted(E0, E0_max * accuracy)
+        min_allowed_ev = accuracy
+        if self.use_kappa:
+            min_allowed_ev = 1 / A.kappa
 
         # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
         while True:
             P = np.diag(1 / np.sqrt(E0[cutoff_index:])) @ V0[:, cutoff_index:].T
             G = P @ G1 @ P.T
             eigenvalues, eigenvectors = sp.linalg.eigh(G)
-            if np.min(eigenvalues) > accuracy or cutoff_index == len(E0) - 1:
+            if np.min(eigenvalues) >= min_allowed_ev or cutoff_index == len(E0) - 1:
                 break
             cutoff_index += 1
 
