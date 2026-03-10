@@ -50,7 +50,8 @@ class BlockEncodingModel:
 
         # Find the quantity of interest that maximizes the error
         approximation = poly(S) * self.b
-        measurement = measurement_max_error(exact_solution, approximation)
+        # measurement = measurement_max_error(exact_solution, approximation)
+        measurement = np.eye(self.b.shape[0])
         qoi_exact = exact_solution.T @ measurement @ exact_solution
         qoi_approximation = approximation.T @ measurement @ approximation
 
