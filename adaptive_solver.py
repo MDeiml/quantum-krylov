@@ -1,187 +1,163 @@
-from functools import cached_property
+from functools import cache
 
 import numpy as np
 import scipy as sp
 
-from solver import Solver
 from block_encoding_model import BlockEncodingModel
 
 
-class AdaptiveSolver(Solver):
-    def __init__(
-        self,
-        steps=3,
-        poly_kind="chebyshev",
-        default_samples=10000,
-        transform_method=None,
-        sup_norm_constraint=False,
-    ):
-        super().__init__(default_samples, transform_method)
-        self.steps = steps
-        self.sup_norm_constraint = sup_norm_constraint
-        if poly_kind == "monomial":
-            self.poly_kind = np.polynomial.Polynomial
-        elif poly_kind == "chebyshev":
-            self.poly_kind = np.polynomial.Chebyshev
+# These functions are cached so that they only execute once
+# for each combination of parameters
+@cache
+def lagrange_basis(steps, square):
+    X = np.polynomial.Chebyshev([0, 1])
+
+    domain = [-1, 1]
+    if square:
+        domain = [0, 1]
+
+    # Number of basis functions
+    N = steps + 1
+
+    # Polynomial with roots at all interpolation points
+    full_poly = np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
+
+    basis = []
+    for k in range(N):
+        # k-th chebyshev node of the second kind
+        xk = np.cos(k / (N - 1) * np.pi)
+        poly = full_poly // (X - xk)
+        poly /= poly(xk)
+        basis.append(np.polynomial.Chebyshev(poly.coef, domain=domain))
+
+    return basis
+
+
+@cache
+def moment_to_gram(steps, square):
+    max_degree = 2 * steps + 1
+
+    X = np.polynomial.Chebyshev([0, 1])
+    if square:
+        X = X * X
+
+    mat_E = np.zeros((steps + 1, steps + 1, max_degree + 1))
+    mat_G = np.zeros((steps + 1, steps + 1, max_degree + 1))
+    for i in range(steps + 1):
+        if square:
+            poly_i = np.polynomial.Chebyshev([0] * (2 * i) + [1])
         else:
-            raise NotImplementedError
-        self.domain = [0, 1] if transform_method == "square" else [-1, 1]
+            poly_i = np.polynomial.Chebyshev([0] * i + [1])
 
-    @cached_property
-    def moment_basis(self):
-        max_degree = 2 * self.steps + 1
+        for j in range(steps + 1):
+            if square:
+                poly_j = np.polynomial.Chebyshev([0] * (2 * j) + [1])
+            else:
+                poly_j = np.polynomial.Chebyshev([0] * j + [1])
+            poly_E = poly_i * poly_j
+            poly_G = X * poly_E
+            if square:
+                # Moments are only even degrees, other coefficients of poly_E
+                # and poly_G will be zero anyways
+                mat_E[i, j, : poly_E.degree() // 2 + 1] = poly_E.coef[::2]
+                mat_G[i, j, : poly_G.degree() // 2 + 1] = poly_G.coef[::2]
+            else:
+                mat_E[i, j, : poly_E.degree() + 1] = poly_E.coef
+                mat_G[i, j, : poly_G.degree() + 1] = poly_G.coef
 
-        basis = [
-            self.poly_kind([0] * i + [1], domain=self.domain).convert(
-                kind=np.polynomial.Chebyshev, domain=self.domain
-            )
-            for i in range(max_degree + 1)
-        ]
-        return basis
+    return mat_E, mat_G
 
-    @cached_property
-    def chebyshev_to_moment_basis(self):
-        return np.linalg.inv(self.moment_basis_to_chebyshev)
 
-    @cached_property
-    def moment_basis_to_chebyshev(self):
-        return np.array(
-            [
-                np.concatenate(
-                    (poly.coef, np.zeros(len(self.moment_basis) - 1 - poly.degree()))
-                )
-                for poly in self.moment_basis
-            ]
-        ).T
+def compute_moments(A: BlockEncodingModel, steps, samples, square):
+    """
+    Estimate moments of the form b^T p(A) b (if qoi = False)
+    or m^T p(A) b (if qoi = True)
+    """
 
-    @cached_property
-    def lagrange_basis(self):
-        X = np.polynomial.Chebyshev([0, 1])
+    max_degree = 2 * steps + 1
 
-        # Number of basis functions
-        N = self.steps + 1
-
-        # Polynomial with roots at all interpolation points
-        full_poly = (
-            np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
+    moments = np.zeros(max_degree + 1)
+    for i in range(max_degree + 1):
+        if square:
+            poly = np.polynomial.Chebyshev([0] * (2 * i) + [1])
+        else:
+            poly = np.polynomial.Chebyshev([0] * i + [1])
+        moments[i] = A.estimate_poly(
+            poly,
+            samples,
+            root=square,
         )
 
-        basis = []
-        for k in range(N):
-            # k-th chebyshev node of the second kind
-            xk = np.cos(k / (N - 1) * np.pi)
-            poly = full_poly // (X - xk)
-            poly /= poly(xk)
-            # Map to domain
-            basis.append(np.polynomial.Chebyshev(poly.coef, domain=self.domain))
+    return moments
 
-        return basis
 
-    def compute_moments(self, A: BlockEncodingModel):
-        """
-        Estimate moments of the form b^T p(A) b (if qoi = False)
-        or m^T p(A) b (if qoi = True)
-        """
+def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square):
+    moments = compute_moments(A, steps, samples, square)
 
-        X = np.polynomial.Chebyshev([0, 1])
-        sq = X * X
+    # Compute lhs matrix and rhs vector
+    mat_E, mat_G = moment_to_gram(steps, square)
+    E = mat_E @ moments
+    G = mat_G @ moments
 
-        moments = np.zeros(len(self.moment_basis))
-        for i, poly in enumerate(self.moment_basis):
-            poly = poly.convert(domain=[-1, 1])
-            if self.transform_method == "square":
-                poly = poly(sq)
-            moments[i] = A.estimate_poly(
-                poly,
-                self.default_samples,
-                root=self.transform_method == "square",
-            )
+    # First remove directions corresponding to small eigenvalues of G
+    accuracy = 2 / np.sqrt(samples)
+    eigenvalues_E, eigenvectors_E = sp.linalg.eigh(E)
+    eval_max = eigenvalues_E[-1]
+    cutoff_index = np.searchsorted(eigenvalues_E, eval_max * accuracy)
+    min_allowed_ev = accuracy
 
-        return moments
-
-    @cached_property
-    def moment_to_gram(self):
-        X = np.polynomial.Chebyshev([0, 1]).convert(domain=self.domain)
-
-        mat_G0 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
-        mat_G1 = np.zeros((self.steps + 1, self.steps + 1, len(self.moment_basis)))
-        for i in range(self.steps + 1):
-            poly_i = np.polynomial.Chebyshev([0] * i + [1], domain=self.domain)
-
-            for j in range(self.steps + 1):
-                poly_j = np.polynomial.Chebyshev([0] * j + [1], domain=self.domain)
-                poly_G0 = poly_i * poly_j
-                poly_G1 = X * poly_G0
-                mat_G0[i, j] = (
-                    self.chebyshev_to_moment_basis[:, : poly_G0.degree() + 1]
-                    @ poly_G0.coef
-                )
-                mat_G1[i, j] = (
-                    self.chebyshev_to_moment_basis[:, : poly_G1.degree() + 1]
-                    @ poly_G1.coef
-                )
-
-        return mat_G0, mat_G1
-
-    def estimate_eigenvalues(self, A: BlockEncodingModel):
-        moments = self.compute_moments(A)
-
-        # Compute lhs matrix and rhs vector
-        mat_G0, mat_G1 = self.moment_to_gram
-        G0 = mat_G0 @ moments
-        G1 = mat_G1 @ moments
-
-        # First remove directions corresponding to small eigenvalues of G
-        accuracy = 2 / np.sqrt(self.default_samples)
-        E0, V0 = sp.linalg.eigh(G0)
-        E0_max = E0[-1]
-        cutoff_index = np.searchsorted(E0, E0_max * accuracy)
-        min_allowed_ev = accuracy
-
-        # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
-        while True:
-            P = np.diag(1 / np.sqrt(E0[cutoff_index:])) @ V0[:, cutoff_index:].T
-            G = P @ G1 @ P.T
-            eigenvalues, eigenvectors = sp.linalg.eigh(G)
-            if np.min(eigenvalues) >= min_allowed_ev or cutoff_index == len(E0) - 1:
-                break
-            cutoff_index += 1
-
-        return eigenvalues
-
-    def compute_polynomial(self, A: BlockEncodingModel):
-        evs = self.estimate_eigenvalues(A)
-
-        if not self.sup_norm_constraint:
-            poly = np.polynomial.Chebyshev.fit(
-                evs, 1 / evs, len(evs) - 1, domain=[-1, 1]
-            )
-            return poly
-
-        lagrange_at_evs = np.zeros((len(evs), self.steps + 1))
-        for i, poly in enumerate(self.lagrange_basis):
-            lagrange_at_evs[:, i] = poly(evs)
-
-        hess = lagrange_at_evs.T @ lagrange_at_evs
-        c = lagrange_at_evs.T @ (1 / evs)
-
-        def f(coef):
-            return 0.5 * coef.T @ hess @ coef - c.T @ coef
-
-        def Df(coef):
-            return hess @ coef - c
-
-        # We do not want to keep the bound exactly
-        relaxation_factor = 1.2
-        # Account for evs being negative, which should only happen very seldomly
-        min_ev = max(np.min(evs), 0.001)
-        bound = relaxation_factor / min_ev
-
-        res = sp.optimize.minimize(
-            f,
-            np.zeros(self.steps + 1),
-            jac=Df,
-            bounds=[(-bound, bound)] * (self.steps + 1),
+    # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
+    while True:
+        P = (
+            np.diag(1 / np.sqrt(eigenvalues_E[cutoff_index:]))
+            @ eigenvectors_E[:, cutoff_index:].T
         )
+        G_sub = P @ G @ P.T
+        eigenvalues, eigenvectors = sp.linalg.eigh(G_sub)
+        if (
+            np.min(eigenvalues) >= min_allowed_ev
+            or cutoff_index == len(eigenvalues_E) - 1
+        ):
+            break
+        cutoff_index += 1
 
-        return sum([res.x[i] * self.lagrange_basis[i] for i in range(self.steps + 1)])
+    return eigenvalues
+
+
+def compute_polynomial(
+    A: BlockEncodingModel, steps, samples, square, sup_norm_constraint
+):
+    evs = estimate_eigenvalues(A, steps, samples, square)
+
+    if not sup_norm_constraint:
+        poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
+        return poly
+
+    lagrange = lagrange_basis(steps, square)
+    lagrange_at_evs = np.zeros((len(evs), steps + 1))
+    for i, poly in enumerate(lagrange):
+        lagrange_at_evs[:, i] = poly(evs)
+
+    hess = lagrange_at_evs.T @ lagrange_at_evs
+    c = lagrange_at_evs.T @ (1 / evs)
+
+    def f(coef):
+        return 0.5 * coef.T @ hess @ coef - c.T @ coef
+
+    def Df(coef):
+        return hess @ coef - c
+
+    # We do not want to keep the bound exactly
+    relaxation_factor = 1.2
+    # Account for evs being negative, which should only happen very seldomly
+    min_ev = max(np.min(evs), 0.001)
+    bound = relaxation_factor / min_ev
+
+    res = sp.optimize.minimize(
+        f,
+        np.zeros(steps + 1),
+        jac=Df,
+        bounds=[(-bound, bound)] * (steps + 1),
+    )
+
+    return sum([res.x[i] * lagrange[i] for i in range(steps + 1)])

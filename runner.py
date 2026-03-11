@@ -70,7 +70,7 @@ class Runner:
             for params in params_problem
         ]
 
-    def run_test_for_solver(self, solver_class, params_solver):
+    def run_test_for_solver(self, solver, name, params_solver):
         params_solver_names = list(params_solver.keys())
 
         iter = (
@@ -82,7 +82,7 @@ class Runner:
         for param in params_solver.values():
             total *= len(param)
 
-        filename = f"results/{solver_class.__name__}_{self.commit_hash}.csv"
+        filename = f"results/{name}_{self.commit_hash}.csv"
         was_created = not os.path.isfile(filename)
 
         with open(filename, "a") as f:
@@ -99,23 +99,21 @@ class Runner:
                 )
                 f.flush()
 
-            for params in tqdm(
-                iter, total=total, desc=f"Testing {solver_class.__name__}"
-            ):
-                solver = solver_class(**params)
+            for params in tqdm(iter, total=total, desc=f"Testing {name}"):
+                print(params)
                 for problem_params, subproblems in self.problems:
                     errors = []
                     complexities = []
                     for A in subproblems:
                         A.reset()
-                        poly = solver.compute_polynomial(A)
-                        if solver.transform_method == "square":
+                        poly = solver(A, **params)
+                        if params["square"]:
                             X = np.polynomial.Chebyshev([0, 1])
                             poly = poly(X * X)
                         error = A.estimate_error(
                             poly,
-                            solver.default_samples,
-                            solver.transform_method == "square",
+                            params["samples"],
+                            params["square"],
                         )
                         errors.append(error)
                         complexities.append(A.complexity())
@@ -126,5 +124,5 @@ class Runner:
                         + [np.average(complexities)]
                         + [np.percentile(errors, p) for p in self.error_percentiles]
                     )
-                    f.write(";".join(list(map(str, res))) + ";\n")
+                    f.write(";".join(list(map(str, res))) + "\n")
                     f.flush()
