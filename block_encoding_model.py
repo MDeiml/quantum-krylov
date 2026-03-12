@@ -1,46 +1,86 @@
 import numpy as np
 from symqsp import compute_angles
 from simulator import Simulator
-from util import measurement_max_error
+from util import measurement_max_error, generate_noise_flips
 
 
 class BlockEncodingModel:
+    """
+    Helper to simulate quantum computation involving a linear system $Ax = b$
+
+    The matrix $A$ is hard-coded to have the form ``np.diag(np.linspace(1/kappa,
+    1, b.shape[0]))``
+
+    :param b:
+        The right hand side of the linear system
+    :param kappa:
+        The condition number of $A$.
+    :param noise:
+        Value between 0 and 1. This is the probability that a random flip will
+        be applied after an application of a block encoding.
+    :param noise_flips:
+        Unitary matrices, corresponding to the possible noise that can be
+        introduced after each application of $A$. Specifically, if noise is
+        applied, the state is multiplied with a random element of `noise_flips`.
+        Should have the shape ``(M, N, N)`` where ``N = b.shape[0]``. Use
+        `util.generate_noise_flips` to generate these matrices.
+    :param seed:
+        Seed for the random generators used for noise and sampling.
+    """
+
     def __init__(
         self,
-        seed: np.random.SeedSequence,
-        b,
-        noise_flips,
-        kappa,
-        noise=0.01,
+        b: np.ndarray,
+        kappa: float = 3,
+        noise: float = 0.01,
+        noise_flips: np.ndarray | None = None,
+        seed: np.random.SeedSequence | None = None,
     ):
-        """
-        Wrapper to simulate quantum device
-
-        :param A:
-            Matrix (2d) or singular values (1d) or condition number (scalar)
-            number (scalar)
-        """
-        self.kappa = kappa
-
-        [self.general_rng_seed, self.noise_rng_seed] = seed.spawn(2)
-
-        n = b.shape[0]
-        self.S = np.linspace(1 / kappa, 1, n)
-
         self.b = b
+        self.kappa = kappa
+        self.S = np.linspace(1 / kappa, 1, b.shape[0])
 
-        self.noise = noise
+        if seed is None:
+            seed = np.random.SeedSequence(0)
+        self.simulator = Simulator(seed, noise)
+
+        if noise_flips is None:
+            noise_flips = generate_noise_flips(
+                np.random.default_rng(np.random.SeedSequence(43)), b.shape[0], 20
+            )
         self.noise_flips = noise_flips
 
-        self.simulator = Simulator(seed, noise_flips, noise)
-
     def reset(self):
+        """
+        Reset the random generators and the complexity counter
+        """
         self.simulator.reset()
 
     def complexity(self):
+        """
+        The number of times a block encoding was applied
+
+        This is counting since this object was created or the last call to
+        `reset`.
+        """
         return self.simulator.complexity()
 
-    def estimate_error(self, poly, samples, root=False):
+    def estimate_error(
+        self, poly: np.polynomial.Chebyshev, samples: int, root: bool = False
+    ):
+        """
+        Estimate the relative error of $p(A)b - A^{-1}b$ as specified in the
+        paper.
+
+        :param poly:
+            The polynomial $p$ approximating $1 / x$.
+        :param samples:
+            The number of samples that should be used to measure the observable.
+            Can be `np.inf` to turn of noise and sampling error.
+        :param root:
+            If ``True``, compute the error of $p(B)b - A^{-1}b$ instead where $B
+            = A^{1/2}$.
+        """
         S = self.S
         if root:
             S = np.sqrt(self.S)
@@ -95,20 +135,27 @@ class BlockEncodingModel:
             [angles for _, angles, _ in angle_sequences],
             samples,
             measure,
+            self.noise_flips,
             weights=weights,
-            test=qoi_approximation / total_normalization**2,
+            reference=qoi_approximation / total_normalization**2,
         )
         qoi_measured = total_normalization**2 * results
 
         return abs(qoi_exact - qoi_measured) / exact_solution_norm**2
 
-    def estimate_poly(self, poly, samples, root=False):
+    def estimate_poly(
+        self, poly: np.polynomial.Chebyshev, samples: int, root: bool = False
+    ):
         """
-        Simulate estimation of b^T poly(A) b
+        Simulate estimation of $b^T poly(A) b$
 
-        :param poly: The matrix polynomial to be computed
-        :param samples: The number of simulated samples. Can be np.inf
-        :param root: If True, compute poly(sqrt(A)) instead
+        :param poly:
+            The matrix polynomial to be computed
+        :param samples:
+            The number of simulated samples. Can be `np.inf` to turn of noise
+            and sampling error.
+        :param root:
+            If True, compute poly(sqrt(A)) instead
         """
 
         S = self.S
@@ -133,7 +180,12 @@ class BlockEncodingModel:
             )
 
         result = self.simulator.simulate_qsvt_folding(
-            S, self.b, angles, samples, test=exact / normalization
+            S,
+            self.b,
+            angles,
+            samples,
+            self.noise_flips,
+            reference=exact / normalization,
         )
 
         return normalization * result

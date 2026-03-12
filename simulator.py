@@ -1,43 +1,102 @@
+from collections.abc import Callable
 import numpy as np
 
 
 class Simulator:
+    """
+    Helper to simulate a quantum device
+
+    This is a low level interface. Use `block_encoding_model.BlockEncodingModel`
+    for the most common cases.
+
+    :param seed:
+        Seed for the random generators used for noise and sampling.
+    :param noise:
+        Value between 0 and 1. This is the probability that a random flip will
+        be applied after an application of a block encoding.
+    """
+
     def __init__(
         self,
         seed: np.random.SeedSequence,
-        noise_flips,
-        noise=0.01,
+        noise: float = 0.01,
     ):
-        """
-        Wrapper to simulate quantum device
-
-        :param A:
-            Matrix (2d) or singular values (1d) or condition number (scalar)
-            number (scalar)
-        """
-
-        [self.general_rng_seed, self.noise_rng_seed] = seed.spawn(2)
-
-        self.noise = noise
-        self.noise_flips = noise_flips
-        self.reset()
-
-    def reset(self):
-        self.calls = 0
         # There are two different generators, to make sure that the total amount
         # of noise for two runs is the same if they use the same number of
         # applications of A and the same number of samples
+        [self.general_rng_seed, self.noise_rng_seed] = seed.spawn(2)
+
+        self.noise = noise
+        self.reset()
+
+    def reset(self):
+        """
+        Reset the random generators and the complexity counter
+        """
+        self.calls = 0
         self.general_rng = np.random.default_rng(self.general_rng_seed)
         self.noise_rng = np.random.default_rng(self.noise_rng_seed)
 
     def complexity(self):
+        """
+        The number of times a block encoding was applied
+
+        This is counting since this object was created or the last call to
+        `reset`.
+        """
         return self.calls
 
-    def simulate_qsvt_folding(self, S, b, angles, samples, test=None):
-        def measurement(x, temp):
-            # a = (x[:, 0, :, :] - x[:, 1, :, :]) / np.sqrt(2)
-            # a.shape = (x.shape[0], -1)
-            # return 1 - 2 * np.vecdot(a, a)
+    def simulate_qsvt_folding(
+        self,
+        S: np.ndarray,
+        b: np.ndarray,
+        angles: np.ndarray,
+        samples: int,
+        noise_flips: np.ndarray,
+        reference: float | None = None,
+    ):
+        """
+        Simulate the measurement of $b^T p(S) b$
+
+        Using the technique of _QSVT bending_ the block encoding of $S$ is only
+        applied ``len(angles) // 2`` times.
+
+        This method calls `simulate_qsvt` internally. It can be quite expensive
+        if `samples` and `self.noise` are both large.
+
+        :param S:
+            Elements of the matrix S. It is assumed that S is a diagonal matrix,
+            which can always be achieved by a suitable change of basis. `S`
+            should thus be a vector of the same dimension as `b`.
+        :param b:
+            The vector `b` as a numpy array
+        :param angles:
+            Angles in R-convention corresponding to the polynomial $p$.
+            (The degree of $p$ is ``len(angles) - 1``).
+            The angles have to be symmetric in the sense that ``angles[-(i
+            + 1)] = angles[i]``. This is true for angles returned by
+            `symqsp.compute_angles`.
+        :param samples:
+            The number of measurements in the Hadamard test for computing the
+            inner product. The accuracy of the estimate will roughly be ``2
+            / sqrt(samples)``.
+        :param noise_flips:
+            Unitary matrices, corresponding to the possible noise that can
+            be introduced after each application of $A$. Specifically, if
+            noise is applied, the state is multiplied with a random element
+            of `noise_flips`. Should have the shape ``(M, N, N)`` where ``N
+            = b.shape[0]``. Use `util.generate_noise_flips` to generate these
+            matrices.
+        :param reference:
+            Optional reference value, which the simulation should equal if no
+            noise is applied. This is only use for testing. Generates an error
+            if the simulated result is not `reference`
+        """
+        np.testing.assert_allclose(
+            angles, angles[::-1], err_msg="Angles should be symmetric"
+        )
+
+        def observable(x, temp):
             x = x.reshape((x.shape[0], 2, -1))
             return 2 * np.vecdot(x[:, 0], x[:, 1])
 
@@ -51,29 +110,77 @@ class Simulator:
                 angles[: len(angles) // 2],
                 -np.concatenate((angles[: len(angles) // 2], [0])),
             ]
+
         return self.simulate_qsvt(
-            S, b, angle_sequences, samples, measurement, test=test
+            S, b, angle_sequences, samples, observable, noise_flips, reference=reference
         )
 
     def simulate_qsvt(
-        self, S, b, angle_sequences, samples, measurement, weights=None, test=None
+        self,
+        S: np.ndarray,
+        b: np.ndarray,
+        angle_sequences: list[np.ndarray],
+        samples: int,
+        observable: Callable[[np.ndarray, np.ndarray], float],
+        noise_flips: np.ndarray,
+        weights: np.ndarray | None = None,
+        reference: float | None = None,
     ):
         """
-        Simulates qsvt with noise.
+        Simulate the measurement of the state $b^T p(S)$ with the given observable.
 
-        Returns states corresponding to noisy simulation of qsvt with the given
-        angles. Results are given as an array with shape ``(samples, ...)``
-        where the second dimension depends on the paramter ``folding``.
+        Specifically, this allows to compute $y^T M y$ where $y = [w_0 p_0(S)
+        b, ..., w_{J-1} p_{J-1}(S) b]$ where $M$ is specified by ``observable``,
+        $p_0, ..., p_{J-1}$ are polynomials with definite partiy as specified by
+        ``angle_sequences`` and $w_0^2 + ... + w_{J-1}^2 = 1$.
 
-        If ``folding == True``, simulates QSVT folding. The number of
-        applications of ``S`` is only half the degree of the polynomial. Each
-        state has dimension ``dim * 4``, corresponding to the state before the
-        last Hadamard gate, which is applied to the most significant bit.
+        This method  can be quite expensive if `samples` and `self.noise` are
+        both large.
 
-        If ``folding == False``, simulates simple QSVT to prepare a solution
-        state. The number of applications of ``S`` is equal to the degree of
-        the polynomial. Each state has dimension ``dim * 2``, where the relavant
-        part is the first half.
+        :param S:
+            Elements of the matrix S. It is assumed that S is a diagonal matrix,
+            which can always be achieved by a suitable change of basis. `S`
+            should thus be a vector of the same dimension as `b`.
+        :param b:
+            The vector `b` as a numpy array.
+        :param angle_sequences:
+            List of list of angles. The element ``angle_sequences[j]``
+            should be an angle sequence in R-convention corresponding to the
+            polynomial $p_j$. (The degree of $p_j$ is ``len(angle_sequences[j])
+            - 1``). The angles have to be symmetric in the sense that
+            ``angle_sequences[j][-(k + 1)] = angles[j][k]``. This is true for
+            angles returned by `symqsp.compute_angles`.
+        :param samples:
+            The number of measurements in the Hadamard test for computing the
+            inner product. The accuracy of the estimate will roughly be ``2
+            / sqrt(samples)``.
+        :param observable:
+            Function that computes the observable from a given state. The
+            state is given as an array of the shape ``(B, J, 2, N)`` where the
+            dimension ``B`` is used to batch calls, i.e. the array contains
+            ``B`` unrelated states, the dimension ``J`` corresponds to the
+            length of ``angle_sequences``, the dimension ``2`` is ``0`` for the
+            relevant part of the state and ``1`` for the "garbarge" part, and
+            ``N`` is the dimension of the linear system, i.e. the same dimension
+            as `b`.
+
+            (The second argument to `observable` is a vector of the same shape
+            as the first argument, which can be used as temporary storage to
+            avoid allocations, or can safely be ignored.)
+        :param noise_flips:
+            Unitary matrices, corresponding to the possible noise that can
+            be introduced after each application of $A$. Specifically, if
+            noise is applied, the state is multiplied with a random element
+            of `noise_flips`. Should have the shape ``(M, N, N)`` where ``N
+            = b.shape[0]``. Use `util.generate_noise_flips` to generate these
+            matrices.
+        :param weights:
+            Optional vector containg the weights $w_0, ..., w_{J-1}$. If
+            ``None``, the default is $w_j = \\sqrt{1/J}$.
+        :param reference:
+            Optional reference value, which the simulation should equal if no
+            noise is applied. This is only use for testing. Generates an error
+            if the simulated result is not `reference`
         """
         S_sqrt = np.sqrt(1 - S**2)
 
@@ -150,11 +257,11 @@ class Simulator:
                     batch += temp_batch
 
                 flip_index = self.general_rng.integers(
-                    0, len(self.noise_flips), size=batch.shape[0]
+                    0, len(noise_flips), size=batch.shape[0]
                 )
                 for k in range(batch.shape[0]):
                     if noise_events[batch_start + k, i] != 0:
-                        flip = self.noise_flips[flip_index[k]]
+                        flip = noise_flips[flip_index[k]]
                         # For some reason matvec does not work here
                         np.einsum(
                             "...ij,...j",
@@ -173,23 +280,23 @@ class Simulator:
             )
 
             # Hadamard test
-            measurements = measurement(batch, temp_batch).real
+            measurements = observable(batch, temp_batch).real
             assert measurements.shape == (batch.shape[0],)
             probabilities = (1 - measurements) / 2
             if j == 0:
-                if test is not None:
+                if reference is not None:
                     # Check that noiseless simulation is correct
-                    np.testing.assert_allclose(measurements[0], test, atol=1e-5)
+                    np.testing.assert_allclose(measurements[0], reference, atol=1e-5)
                 # Noiseless run happens multiple times
-                result += self.measure(
+                result += self._measure(
                     probabilities[0], samples - noise_events.shape[0] - 1
                 )
                 probabilities = probabilities[1:]
-            result += self.measure(probabilities)
+            result += self._measure(probabilities)
 
         return 1 - 2 * result / samples
 
-    def measure(self, probabilities, samples=1):
+    def _measure(self, probabilities, samples=1):
         if probabilities.ndim > 0 and probabilities.shape[0] == 0:
             return 0
         max_probability = np.max(probabilities)

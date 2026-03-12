@@ -1,35 +1,53 @@
+from collections.abc import Callable
+from typing import Concatenate
+import itertools
 import numpy as np
 from block_encoding_model import BlockEncodingModel
 from util import generate_noise_flips
 from tqdm import tqdm
-import itertools
 import git
 import os.path
 
 
 class Runner:
+    """
+    Helper for testing solvers with many combinations of parameters.
+
+    Will write a ``.csv`` file tagged with the hash of the current git commit.
+    Contains the parameters for the equation, the parameters for the solver, and
+    the requested error percentiles.
+
+    :param params_problem:
+        Dictionary, with keys corresponding to parameters to
+        `BlockEncodingModel`, and values as lists of parameters to try.
+    :param tries:
+        The number of equations to try each setup with. Will test each solver
+        with the same equations, and will simulate each solver for each equation
+        once.
+    :param error_percentiles:
+        What error quantities to output into the ``.csv`` file.
+    :param dim:
+        The dimension of each equation
+    """
+
     def __init__(
         self,
-        params_problem,
-        tries=1000,
-        error_percentiles=[0, 5, 50, 95, 100],
-        condition=10,
-        dim=128,
-        enforce_git_commit=True,
+        params_problem: dict,
+        tries: int = 200,
+        error_percentiles: list[float] = [0, 5, 50, 95, 100],
+        dim: int = 128,
     ):
         self.tries = tries
         self.error_percentiles = error_percentiles
         self.dim = dim
-        self.condition = condition
 
         print("Checking git hash...")
         repo = git.Repo(search_parent_directories=True)
-        if enforce_git_commit:
-            assert not repo.is_dirty(), (
-                "Create a git commit before running to ensure proper tagging"
-            )
         self.commit_hash = repo.head.object.hexsha
         if repo.is_dirty():
+            print(
+                "Consider creating a git commit before running to ensure proper tagging"
+            )
             self.commit_hash += "_modified"
 
         print("Generating problems...")
@@ -63,14 +81,38 @@ class Runner:
             (
                 params,
                 [
-                    BlockEncodingModel(seed, equation, nf, condition, **params)
+                    BlockEncodingModel(equation, noise_flips=nf, seed=seed, **params)
                     for (seed, equation, nf) in zip(seeds, equations, noise_flips)
                 ],
             )
             for params in params_problem
         ]
 
-    def run_test_for_solver(self, solver, name, params_solver):
+    def test_solver(
+        self,
+        solver: Callable[Concatenate[BlockEncodingModel, ...], np.polynomial.Chebyshev],
+        name: str,
+        params_solver: dict,
+    ):
+        """
+        Test the given solver.
+
+        The output will be stored in the file ``results/{name}_{commit
+        hash}.csv``, or ``results/{name}_{commit hash}_modified.csv`` if there
+        are uncommited changes.
+
+        :param solver:
+            Function taking an equation $Ax = b$ represented by a
+            `BlockEncodingModel` as its first argument, and returning a
+            polynomial $p$ of type `np.polynomial.Chebshev` such that $p(A)b
+            \\approx A^{-1}b$.
+        :param name:
+            Name for the ``.csv`` file
+        :param params_solver:
+            Dictionary, with keys corresponding to the names of all but the
+            first parameter to `solver`, and values as lists of parameters to
+            try.
+        """
         params_solver_names = list(params_solver.keys())
 
         iter = (
@@ -90,18 +132,19 @@ class Runner:
                 f.write(
                     ";".join(
                         params_solver_names
-                        + ["condition"]
                         + self.params_problem_names
                         + ["complexity"]
                         + [f"error {p} percentile" for p in self.error_percentiles]
                     )
-                    + ";\n"
+                    + "\n"
                 )
                 f.flush()
 
-            for params in tqdm(iter, total=total, desc=f"Testing {name}"):
-                print(params)
+            tqdm_iter = tqdm(iter, total=total, desc=f"Testing {name}")
+            for params in tqdm_iter:
                 for problem_params, subproblems in self.problems:
+                    params_string = ", ".join([f"{k}={v}" for k, v in (params | problem_params).items()])
+                    tqdm_iter.set_description(f"Testing {name}({params_string})")
                     errors = []
                     complexities = []
                     for A in subproblems:
@@ -119,7 +162,6 @@ class Runner:
                         complexities.append(A.complexity())
                     res = (
                         list(params.values())
-                        + [self.condition]
                         + list(problem_params.values())
                         + [np.average(complexities)]
                         + [np.percentile(errors, p) for p in self.error_percentiles]
