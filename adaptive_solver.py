@@ -9,15 +9,14 @@ from block_encoding_model import BlockEncodingModel
 # These functions are cached so that they only execute once
 # for each combination of parameters
 @cache
-def lagrange_basis(steps, square):
+def lagrange_basis(deg, square):
     X = np.polynomial.Chebyshev([0, 1])
 
     domain = [-1, 1]
     if square:
         domain = [0, 1]
 
-    # Number of basis functions
-    N = steps + 1
+    N = deg + 1
 
     # Polynomial with roots at all interpolation points
     full_poly = np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
@@ -133,31 +132,48 @@ def compute_polynomial(
         poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
         return poly
 
-    lagrange = lagrange_basis(steps, square)
-    lagrange_at_evs = np.zeros((len(evs), steps + 1))
-    for i, poly in enumerate(lagrange):
-        lagrange_at_evs[:, i] = poly(evs)
+    best_poly = None
 
-    hess = lagrange_at_evs.T @ lagrange_at_evs
-    c = lagrange_at_evs.T @ (1 / evs)
+    deg = steps
 
-    def f(coef):
-        return 0.5 * coef.T @ hess @ coef - c.T @ coef
+    while deg > 0:
+        lagrange = lagrange_basis(deg, square)
+        lagrange_at_evs = np.zeros((len(evs), deg + 1))
+        for i, poly in enumerate(lagrange):
+            lagrange_at_evs[:, i] = poly(evs)
 
-    def Df(coef):
-        return hess @ coef - c
+        hess = lagrange_at_evs.T @ lagrange_at_evs
+        c = lagrange_at_evs.T @ (1 / evs)
 
-    # We do not want to keep the bound exactly
-    relaxation_factor = 1.2
-    # Account for evs being negative, which should only happen very seldomly
-    min_ev = max(np.min(evs), 0.001)
-    bound = relaxation_factor / min_ev
+        def f(coef):
+            return 0.5 * coef.T @ hess @ coef - c.T @ coef
 
-    res = sp.optimize.minimize(
-        f,
-        np.zeros(steps + 1),
-        jac=Df,
-        bounds=[(-bound, bound)] * (steps + 1),
-    )
+        def Df(coef):
+            return hess @ coef - c
 
-    return sum([res.x[i] * lagrange[i] for i in range(steps + 1)])
+        # We do not want to keep the bound exactly
+        relaxation_factor = 1.2
+        # Account for evs being negative, which should only happen very seldomly
+        min_ev = max(np.min(evs), 0.001)
+        bound = relaxation_factor / min_ev
+
+        res = sp.optimize.minimize(
+            f,
+            np.zeros(deg + 1),
+            jac=Df,
+            bounds=[(-bound, bound)] * (deg + 1),
+        )
+        poly = sum([res.x[i] * lagrange[i] for i in range(deg + 1)])
+
+        # If the points are interpolated exactly, reduce the polynomial degree
+        # until there is some error, and return the smallest polynomial that has
+        # zero error.
+        if res.fun + 0.5 * np.dot(1 / evs, 1 / evs) > 1e-6:
+            if best_poly is None:
+                best_poly = poly
+            break
+        best_poly = poly
+
+        deg -= 1
+
+    return best_poly

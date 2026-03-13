@@ -4,7 +4,7 @@ import scipy as sp
 from block_encoding_model import BlockEncodingModel
 
 
-def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind):
+def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, square):
     X = np.polynomial.Chebyshev([0, 1])
     sq = X * X
 
