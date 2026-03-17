@@ -90,7 +90,7 @@ def compute_moments(A: BlockEncodingModel, steps, samples, square):
     return moments
 
 
-def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square):
+def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kappa):
     moments = compute_moments(A, steps, samples, square)
 
     # Compute lhs matrix and rhs vector
@@ -104,6 +104,8 @@ def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square):
     eval_max = eigenvalues_E[-1]
     cutoff_index = np.searchsorted(eigenvalues_E, eval_max * accuracy)
     min_allowed_ev = accuracy
+    if use_kappa:
+        min_allowed_ev = 1 / A.kappa
 
     # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
     while True:
@@ -124,9 +126,9 @@ def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square):
 
 
 def compute_polynomial(
-    A: BlockEncodingModel, steps, samples, square, sup_norm_constraint
+    A: BlockEncodingModel, steps, samples, square, sup_norm_constraint, use_kappa
 ):
-    evs = estimate_eigenvalues(A, steps, samples, square)
+    evs = estimate_eigenvalues(A, steps, samples, square, use_kappa)
 
     if not sup_norm_constraint:
         poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
