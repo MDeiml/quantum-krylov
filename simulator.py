@@ -220,7 +220,7 @@ class Simulator:
         xs = np.zeros((batch_size, len(angle_sequences), 2, dim), dtype=np.complex64)
         temp = np.zeros_like(xs)
 
-        result = 0
+        result = None
         for j in range(int(np.ceil(noise_events.shape[0] / batch_size))):
             # Setup initial state corresponding to LCU
             batch_start = j * batch_size
@@ -281,15 +281,15 @@ class Simulator:
 
             # Hadamard test
             measurements = observable(batch, temp_batch).real
-            assert measurements.shape == (batch.shape[0],)
+            assert measurements.shape[0] == batch.shape[0]
             probabilities = (1 - measurements) / 2
             if j == 0:
                 if reference is not None:
                     # Check that noiseless simulation is correct
                     np.testing.assert_allclose(measurements[0], reference, atol=1e-5)
                 # Noiseless run happens multiple times
-                result += self._measure(
-                    probabilities[0], samples - noise_events.shape[0] - 1
+                result = self._measure(
+                    probabilities[0:1], samples - noise_events.shape[0] - 1
                 )
                 probabilities = probabilities[1:]
             result += self._measure(probabilities)
@@ -305,4 +305,4 @@ class Simulator:
             f"probabilities [{min_probability}, {max_probability}] are not between 0 and 1"
         )
         probabilities = np.minimum(samples, probabilities)
-        return np.sum(self.general_rng.binomial(samples, probabilities))
+        return np.sum(self.general_rng.binomial(samples, probabilities), axis=0)

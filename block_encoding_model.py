@@ -1,7 +1,7 @@
 import numpy as np
 from symqsp import compute_angles
 from simulator import Simulator
-from util import measurement_max_error, generate_noise_flips
+from util import generate_noise_flips
 
 
 class BlockEncodingModel:
@@ -90,19 +90,16 @@ class BlockEncodingModel:
 
         # Find the quantity of interest that maximizes the error
         approximation = poly(S) * self.b
-        # measurement = measurement_max_error(exact_solution, approximation)
-        measurement = np.eye(self.b.shape[0])
-        qoi_exact = exact_solution.T @ measurement @ exact_solution
-        qoi_approximation = approximation.T @ measurement @ approximation
 
         if np.isinf(samples):
             self.simulator.calls = np.inf
-            return abs(qoi_exact - qoi_approximation) / exact_solution_norm**2
+            diff = exact_solution - approximation
+            return np.dot(diff, diff) / exact_solution_norm**2
 
         # If the polynomial is zero, we can conlude that the result must be
         # zero without using the quantum computer
         if np.allclose(poly.coef, 0, atol=1e-6):
-            return abs(qoi_exact) / exact_solution_norm
+            return 1
 
         angle_sequences = compute_angles(poly)
 
@@ -120,16 +117,23 @@ class BlockEncodingModel:
             for _, _, normalization in angle_sequences
         ]
 
+        # Measure xx^T and Id - xx^T
         def measure(x, temp):
             x = x[:, :, 0, :]
             for i, weight in enumerate(weights):
                 x[:, i, :] *= weight
             np.sum(x[:, :, :], axis=1, out=x[:, 0, :])
             x = x[:, 0, :]
-            np.matvec(measurement, x, out=temp[:, 0, 0, :])
-            return np.vecdot(x.real, temp[:, 0, 0, :].real)
+            return np.stack(
+                (
+                    np.vecdot(x.real, exact_solution / exact_solution_norm) ** 2,
+                    np.vecdot(x.real, x.real)
+                    - np.vecdot(x.real, exact_solution / exact_solution_norm) ** 2,
+                ),
+                axis=-1,
+            )
 
-        results = self.simulator.simulate_qsvt(
+        result = self.simulator.simulate_qsvt(
             S,
             self.b,
             [angles for _, angles, _ in angle_sequences],
@@ -137,11 +141,35 @@ class BlockEncodingModel:
             measure,
             self.noise_flips,
             weights=weights,
-            reference=qoi_approximation / total_normalization**2,
+            reference=np.array(
+                [
+                    np.dot(
+                        approximation / total_normalization,
+                        exact_solution / exact_solution_norm,
+                    )
+                    ** 2,  # axial norm
+                    np.dot(
+                        approximation / total_normalization,
+                        approximation / total_normalization,
+                    )
+                    - np.dot(
+                        approximation / total_normalization,
+                        exact_solution / exact_solution_norm,
+                    )
+                    ** 2,  # orthogonal norm
+                ]
+            ),
         )
-        qoi_measured = total_normalization**2 * results
+        result *= total_normalization**2
+        result_axial_sq, result_orthogonal_sq = result
 
-        return abs(qoi_exact - qoi_measured) / exact_solution_norm**2
+        # Assume, that approximation at least points in the correct direction,
+        # so np.dot(approximation, exact_solution) is positive
+        error_sq = (np.sqrt(result_axial_sq) - exact_solution_norm) ** 2 + np.abs(
+            result_orthogonal_sq
+        )
+
+        return error_sq / exact_solution_norm**2
 
     def estimate_poly(
         self, poly: np.polynomial.Chebyshev, samples: int, root: bool = False
