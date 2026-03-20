@@ -55,3 +55,25 @@ def measurement_max_error(reference, approximation):
             @ eigvec.T
             @ transform_basis.T
         )
+
+
+def plot_poly(polys, A, square=False):
+    import matplotlib.pyplot as plt
+
+    colors = ["#0087c1", "#f6a800"]
+    if not isinstance(polys, list):
+        polys = [polys]
+    xs = np.linspace(-1, 1)
+    ys_max = 0
+    for i, poly in enumerate(polys):
+        if square:
+            ys = poly(xs**2)
+        else:
+            ys = poly(xs)
+        ys_max = max(ys_max, np.max(np.abs(ys)))
+        plt.plot(xs, ys, color=colors[i])
+    plt.scatter(A.D, 1 / A.D, A.b**2 * 100, color="#ad007c")
+    plt.ylim([-ys_max - 1, ys_max + 1])
+    plt.plot(xs[xs < 0], 1 / xs[xs < 0], "k--", linewidth=0.5)
+    plt.plot(xs[xs > 0], 1 / xs[xs > 0], "k--", linewidth=0.5)
+    plt.show()

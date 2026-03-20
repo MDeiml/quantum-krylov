@@ -6,15 +6,12 @@ from util import generate_noise_flips
 
 class BlockEncodingModel:
     """
-    Helper to simulate quantum computation involving a linear system $Ax = b$
+    Helper to simulate quantum computation involving a linear system $Dx = b$ where $D$ is diagonal.
 
-    The matrix $A$ is hard-coded to have the form ``np.diag(np.linspace(1/kappa,
-    1, b.shape[0]))``
-
+    :param D:
+        The entries of the diagonal matrix $S$
     :param b:
         The right hand side of the linear system
-    :param kappa:
-        The condition number of $A$.
     :param noise:
         Value between 0 and 1. This is the probability that a random flip will
         be applied after an application of a block encoding.
@@ -30,15 +27,22 @@ class BlockEncodingModel:
 
     def __init__(
         self,
+        D: np.ndarray,
         b: np.ndarray,
-        kappa: float = 3,
+        kappa: float | None = None,
         noise: float = 0.01,
         noise_flips: np.ndarray | None = None,
         seed: np.random.SeedSequence | None = None,
     ):
+        assert b.ndim == 1, "b should be a vector"
+        assert np.isclose(np.linalg.norm(b), 1, atol=1e-8), "b should be normalized"
         self.b = b
-        self.kappa = kappa
-        self.S = np.linspace(1 / kappa, 1, b.shape[0])
+
+        assert b.shape == D.shape, "D should be diagonal and of the same size as b"
+        smin = np.min(D)
+        assert smin > 0, "D must be positive definite"
+        self.kappa = kappa if kappa is not None else 1 / smin
+        self.D = D
 
         if seed is None:
             seed = np.random.SeedSequence(0)
@@ -81,15 +85,15 @@ class BlockEncodingModel:
             If ``True``, compute the error of $p(B)b - A^{-1}b$ instead where $B
             = A^{1/2}$.
         """
-        S = self.S
+        D = self.D
         if root:
-            S = np.sqrt(self.S)
+            D = np.sqrt(self.D)
 
-        exact_solution = self.b / self.S
+        exact_solution = self.b / self.D
         exact_solution_norm = np.linalg.norm(exact_solution)
 
         # Find the quantity of interest that maximizes the error
-        approximation = poly(S) * self.b
+        approximation = poly(D) * self.b
 
         if np.isinf(samples):
             self.simulator.calls = np.inf
@@ -134,7 +138,7 @@ class BlockEncodingModel:
             )
 
         result = self.simulator.simulate_qsvt(
-            S,
+            D,
             self.b,
             [angles for _, angles, _ in angle_sequences],
             samples,
@@ -186,11 +190,11 @@ class BlockEncodingModel:
             If True, compute poly(sqrt(A)) instead
         """
 
-        S = self.S
+        D = self.D
         if root:
-            S = np.sqrt(self.S)
+            D = np.sqrt(self.D)
 
-        exact = np.dot(self.b, poly(S) * self.b)
+        exact = np.dot(self.b, poly(D) * self.b)
         # TODO: Also consider applications of b so that samples = inf makes sense
         if np.isinf(samples):
             self.simulator.calls = np.inf
@@ -208,7 +212,7 @@ class BlockEncodingModel:
             )
 
         result = self.simulator.simulate_qsvt_folding(
-            S,
+            D,
             self.b,
             angles,
             samples,

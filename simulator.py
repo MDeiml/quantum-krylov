@@ -48,7 +48,7 @@ class Simulator:
 
     def simulate_qsvt_folding(
         self,
-        S: np.ndarray,
+        D: np.ndarray,
         b: np.ndarray,
         angles: np.ndarray,
         samples: int,
@@ -56,17 +56,17 @@ class Simulator:
         reference: float | None = None,
     ):
         """
-        Simulate the measurement of $b^T p(S) b$
+        Simulate the measurement of $b^T p(D) b$
 
-        Using the technique of _QSVT bending_ the block encoding of $S$ is only
+        Using the technique of _QSVT bending_ the block encoding of $D$ is only
         applied ``len(angles) // 2`` times.
 
         This method calls `simulate_qsvt` internally. It can be quite expensive
         if `samples` and `self.noise` are both large.
 
-        :param S:
-            Elements of the matrix S. It is assumed that S is a diagonal matrix,
-            which can always be achieved by a suitable change of basis. `S`
+        :param D:
+            Elements of the matrix D. It is assumed that D is a diagonal matrix,
+            which can always be achieved by a suitable change of basis. `D`
             should thus be a vector of the same dimension as `b`.
         :param b:
             The vector `b` as a numpy array
@@ -112,12 +112,12 @@ class Simulator:
             ]
 
         return self.simulate_qsvt(
-            S, b, angle_sequences, samples, observable, noise_flips, reference=reference
+            D, b, angle_sequences, samples, observable, noise_flips, reference=reference
         )
 
     def simulate_qsvt(
         self,
-        S: np.ndarray,
+        D: np.ndarray,
         b: np.ndarray,
         angle_sequences: list[np.ndarray],
         samples: int,
@@ -127,19 +127,19 @@ class Simulator:
         reference: float | None = None,
     ):
         """
-        Simulate the measurement of the state $b^T p(S)$ with the given observable.
+        Simulate the measurement of the state $b^T p(D)$ with the given observable.
 
-        Specifically, this allows to compute $y^T M y$ where $y = [w_0 p_0(S)
-        b, ..., w_{J-1} p_{J-1}(S) b]$ where $M$ is specified by ``observable``,
+        Specifically, this allows to compute $y^T M y$ where $y = [w_0 p_0(D)
+        b, ..., w_{J-1} p_{J-1}(D) b]$ where $M$ is specified by ``observable``,
         $p_0, ..., p_{J-1}$ are polynomials with definite partiy as specified by
         ``angle_sequences`` and $w_0^2 + ... + w_{J-1}^2 = 1$.
 
         This method  can be quite expensive if `samples` and `self.noise` are
         both large.
 
-        :param S:
-            Elements of the matrix S. It is assumed that S is a diagonal matrix,
-            which can always be achieved by a suitable change of basis. `S`
+        :param D:
+            Elements of the matrix D. It is assumed that D is a diagonal matrix,
+            which can always be achieved by a suitable change of basis. `D`
             should thus be a vector of the same dimension as `b`.
         :param b:
             The vector `b` as a numpy array.
@@ -182,7 +182,7 @@ class Simulator:
             noise is applied. This is only use for testing. Generates an error
             if the simulated result is not `reference`
         """
-        S_sqrt = np.sqrt(1 - S**2)
+        D_sqrt = np.sqrt(1 - D**2)
 
         dim = b.shape[0]
         duration = max([len(angles) - 1 for angles in angle_sequences])
@@ -245,14 +245,14 @@ class Simulator:
                             # polynomial has the same partiy as the longest polynomial
 
                             np.multiply(
-                                S_sqrt, batch[:, k, ::-1, :], out=temp_batch[:, 0]
+                                D_sqrt, batch[:, k, ::-1, :], out=temp_batch[:, 0]
                             )
-                            batch[:, k] *= S
+                            batch[:, k] *= D
                             batch[:, k, 1] *= -1
                             batch[:, k] += temp_batch[:, 0]
                 else:
-                    np.multiply(S_sqrt, batch[:, :, ::-1, :], out=temp_batch)
-                    batch *= S
+                    np.multiply(D_sqrt, batch[:, :, ::-1, :], out=temp_batch)
+                    batch *= D
                     batch[:, :, 1] *= -1
                     batch += temp_batch
 

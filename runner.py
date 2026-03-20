@@ -54,35 +54,43 @@ class Runner:
         seed_sequence = np.random.SeedSequence(0)
         global_rng = np.random.default_rng(seed_sequence.spawn(1)[0])
 
-        self.params_problem_names = list(params_problem.keys())
+        # Generate bs and Ds
+        kappas = params_problem["kappa"]
+        del params_problem["kappa"]
+        Ds = np.zeros((len(kappas), tries, dim))
+        bs = np.zeros((len(kappas), tries, dim))
+        for i, kappa in enumerate(kappas):
+            Ds[i] = global_rng.uniform(1 / kappa, 1, tries * dim).reshape((tries, dim))
+            bs[i] = global_rng.normal(size=tries * dim).reshape((tries, dim))
+            for j in range(tries):
+                norm = np.linalg.norm(bs[i, j])
+                assert norm > 1e-4
+                bs[i, j] /= norm
+
+        noise_flips_per_problem = 20
+        noise_flips = generate_noise_flips(
+            global_rng, dim, len(kappas) * tries * noise_flips_per_problem
+        )
+        noise_flips = noise_flips.reshape(
+            (len(kappas), tries, noise_flips_per_problem, 2 * dim, 2 * dim)
+        )
+
+        self.params_problem_names = list(params_problem.keys()) + ["kappa"]
         params_problem = list(
             dict(zip(params_problem.keys(), x))
             for x in itertools.product(*params_problem.values())
         )
 
-        # Generate bs and ms
-        equations = global_rng.normal(size=tries * dim).reshape((tries, dim))
-        for i in range(equations.shape[0]):
-            norm = np.linalg.norm(equations[i])
-            assert norm > 1e-4
-            equations[i] /= norm
-        equations = equations.reshape((tries, dim))
-
-        noise_flips_per_problem = 20
-        noise_flips = generate_noise_flips(
-            global_rng, dim, tries * noise_flips_per_problem
-        )
-        noise_flips = noise_flips.reshape(
-            (tries, noise_flips_per_problem, 2 * dim, 2 * dim)
-        )
-
-        seeds = seed_sequence.spawn(tries)
+        seeds = [seed_sequence.spawn(tries) for _ in kappas]
         self.problems = [
             (
-                params,
+                params | {"kappa": kappa},
                 [
-                    BlockEncodingModel(equation, noise_flips=nf, seed=seed, **params)
-                    for (seed, equation, nf) in zip(seeds, equations, noise_flips)
+                    BlockEncodingModel(
+                        D, b, kappa=kappa, noise_flips=nf, seed=seed, **params
+                    )
+                    for seed, D, b, nf in zip(seeds[i], Ds[i], bs[i], noise_flips[i])
+                    for i, kappa in enumerate(kappas)
                 ],
             )
             for params in params_problem
@@ -143,7 +151,9 @@ class Runner:
             tqdm_iter = tqdm(iter, total=total, desc=f"Testing {name}")
             for params in tqdm_iter:
                 for problem_params, subproblems in self.problems:
-                    params_string = ", ".join([f"{k}={v}" for k, v in (params | problem_params).items()])
+                    params_string = ", ".join(
+                        [f"{k}={v}" for k, v in (params | problem_params).items()]
+                    )
                     tqdm_iter.set_description(f"Testing {name}({params_string})")
                     errors = []
                     complexities = []
