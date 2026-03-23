@@ -169,9 +169,9 @@ class BlockEncodingModel:
 
         # Assume, that approximation at least points in the correct direction,
         # so np.dot(approximation, exact_solution) is positive
-        error_sq = (np.sqrt(result_axial_sq) - exact_solution_norm) ** 2 + np.abs(
-            result_orthogonal_sq
-        )
+        error_sq = (
+            np.sqrt(np.maximum(0, result_axial_sq)) - exact_solution_norm
+        ) ** 2 + np.abs(result_orthogonal_sq)
 
         return error_sq / exact_solution_norm**2
 

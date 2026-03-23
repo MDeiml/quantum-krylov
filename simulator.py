@@ -191,15 +191,11 @@ class Simulator:
         # The specific use of noise_rng makes sure that the total sequence of
         # numbers generated using binomial are the same for each separate reset.
         # poission would be more accurate
-        noise_events = (
-            self.noise_rng.binomial(
-                1,
-                self.noise,
-                size=samples * duration,
-            )
-            .reshape((samples, -1))
-            .astype(np.uint32)
-        )
+        noise_events = self.noise_rng.binomial(
+            1,
+            self.noise,
+            size=(samples, duration),
+        ).astype(np.uint32)
         events_per_sample = np.sum(noise_events, axis=-1)
 
         # Categorize into noiseless runs and ones with noise

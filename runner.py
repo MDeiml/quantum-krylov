@@ -35,6 +35,7 @@ class Runner:
         params_problem: dict,
         tries: int = 200,
         error_percentiles: list[float] = [0, 5, 50, 95, 100],
+        condition_bound_inaccuaracy=0.1,
         dim: int = 128,
     ):
         self.tries = tries
@@ -60,8 +61,11 @@ class Runner:
         Ds = np.zeros((len(kappas), tries, dim))
         bs = np.zeros((len(kappas), tries, dim))
         for i, kappa in enumerate(kappas):
-            Ds[i] = global_rng.uniform(1 / kappa, 1, tries * dim).reshape((tries, dim))
-            bs[i] = global_rng.normal(size=tries * dim).reshape((tries, dim))
+            smin = global_rng.uniform(
+                1 / kappa, 1 / kappa / (1 - condition_bound_inaccuaracy), tries
+            )
+            Ds[i] = global_rng.uniform(smin[:, np.newaxis], 1, (tries, dim))
+            bs[i] = global_rng.normal(size=(tries, dim))
             for j in range(tries):
                 norm = np.linalg.norm(bs[i, j])
                 assert norm > 1e-4
