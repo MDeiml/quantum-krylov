@@ -7,7 +7,7 @@ import itertools
 # if repo.is_dirty():
 #     commit_hash += "_modified"
 
-commit_hash = "59898b8caddb6e95b0c0f004b564ed9ec01607cd"
+commit_hash = "24e44ca4b45806ad3ef0a394b730cd5fe823b9de"
 
 def sqlite(sql, output=None) -> str:
     if output is None:
@@ -25,21 +25,23 @@ problems = [l.split(";") for l in sqlite("select distinct noise, samples from ad
 
 for problem in problems:
     problem_name = "_".join(problem)
-    params = [l.split(";") for l in sqlite("select distinct sup_norm_constraint, square from adaptive").splitlines()]
+    params = [l.split(";") for l in sqlite("select distinct sup_norm_constraint, square, use_kappa from adaptive").splitlines()]
 
     select = "select c.steps"
     table = " from (select distinct steps from adaptive union select distinct steps from static) as c"
     for i, p in enumerate(params):
         column_name = "_".join(["adaptive"] + p)
+        select += f", a{i}.complexity as {column_name}_complexity"
         select += f", a{i}.'error 0 percentile' as {column_name}_0"
         select += f", a{i}.'error 50 percentile' as {column_name}_50"
         select += f", a{i}.'error 100 percentile' as {column_name}_100"
-        table += f" left join adaptive as a{i} on a{i}.steps = c.steps and a{i}.sup_norm_constraint='{p[0]}' and a{i}.square='{p[1]}' and a{i}.noise={problem[0]} and a{i}.samples={problem[1]}"
+        table += f" left join adaptive as a{i} on a{i}.steps = c.steps and a{i}.sup_norm_constraint='{p[0]}' and a{i}.square='{p[1]}' and a{i}.use_kappa='{p[2]}' and a{i}.noise={problem[0]} and a{i}.samples={problem[1]}"
 
     params = [l.split(";") for l in sqlite("select distinct poly_kind, square from static").splitlines()]
 
     for i, p in enumerate(params):
         column_name = "_".join(p)
+        select += f", n{i}.complexity as {column_name}_complexity"
         select += f", n{i}.'error 0 percentile' as {column_name}_0"
         select += f", n{i}.'error 50 percentile' as {column_name}_50"
         select += f", n{i}.'error 100 percentile' as {column_name}_100"
