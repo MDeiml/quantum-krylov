@@ -7,6 +7,11 @@ from util import generate_noise_flips
 from tqdm import tqdm
 import git
 import os.path
+import multiprocessing
+
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OMP_NUM_THREADS"] = "1"
 
 
 class Runner:
@@ -37,10 +42,15 @@ class Runner:
         error_percentiles: list[float] = [0, 5, 50, 95, 100],
         condition_bound_inaccuaracy=0.1,
         dim: int = 128,
+        num_processes: int | None = None,
     ):
         self.tries = tries
         self.error_percentiles = error_percentiles
         self.dim = dim
+        self.num_processes = min(
+            num_processes if num_processes is not None else multiprocessing.cpu_count(),
+            tries,
+        )
 
         print("Checking git hash...")
         repo = git.Repo(search_parent_directories=True)
@@ -139,7 +149,7 @@ class Runner:
         filename = f"results/{name}_{self.commit_hash}.csv"
         was_created = not os.path.isfile(filename)
 
-        with open(filename, "a") as f:
+        with open(filename, "a") as f, multiprocessing.Pool(self.num_processes) as pool:
             if was_created:
                 f.write(
                     ";".join(
@@ -161,19 +171,11 @@ class Runner:
                     tqdm_iter.set_description(f"Testing {name}({params_string})")
                     errors = []
                     complexities = []
-                    for A in subproblems:
-                        A.reset()
-                        poly = solver(A, **params)
-                        if params["square"]:
-                            X = np.polynomial.Chebyshev([0, 1])
-                            poly = poly(X * X)
-                        error = A.estimate_error(
-                            poly,
-                            params["samples"],
-                            params["square"],
-                        )
-                        errors.append(error)
-                        complexities.append(A.complexity())
+                    results = pool.map(
+                        _process_solver,
+                        zip(subproblems, itertools.repeat((solver, params))),
+                    )
+                    errors, complexities = zip(*results)
                     res = (
                         list(params.values())
                         + list(problem_params.values())
@@ -182,3 +184,18 @@ class Runner:
                     )
                     f.write(";".join(list(map(str, res))) + "\n")
                     f.flush()
+
+
+def _process_solver(p):
+    A, (solver, params) = p
+    A.reset()
+    poly = solver(A, **params)
+    if params["square"]:
+        X = np.polynomial.Chebyshev([0, 1])
+        poly = poly(X * X)
+    error = A.estimate_error(
+        poly,
+        params["samples"],
+        params["square"],
+    )
+    return error, A.complexity()
