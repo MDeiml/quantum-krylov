@@ -175,7 +175,8 @@ class Runner:
                         _process_solver,
                         zip(subproblems, itertools.repeat((solver, params))),
                     )
-                    errors, complexities = zip(*results)
+                    errors, subproblems[:] = zip(*results)
+                    complexities = [p.complexity() for p in subproblems]
                     res = (
                         list(params.values())
                         + list(problem_params.values())
@@ -198,4 +199,4 @@ def _process_solver(p):
         params["samples"],
         params["square"],
     )
-    return error, A.complexity()
+    return error, A

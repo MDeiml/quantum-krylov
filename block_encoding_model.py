@@ -53,6 +53,8 @@ class BlockEncodingModel:
                 np.random.default_rng(np.random.SeedSequence(43)), b.shape[0], 20
             )
         self.noise_flips = noise_flips
+        # np.polynomial.Chebyshev is not hashable, so we cannot use dict
+        self.cache = []
 
     def reset(self):
         """
@@ -190,6 +192,29 @@ class BlockEncodingModel:
             If True, compute poly(sqrt(A)) instead
         """
 
+        p = (
+            poly.coef,
+            samples,
+            root,
+            self.simulator.calls,
+            self.simulator.general_rng.bit_generator.state,
+            self.simulator.noise_rng.bit_generator.state,
+        )
+
+        for k, v in self.cache:
+            if (
+                p[0].shape == k[0].shape
+                and np.allclose(p[0], k[0], atol=1e-6)
+                and p[1:] == k[1:]
+            ):
+                (
+                    result,
+                    self.simulator.calls,
+                    self.simulator.general_rng.bit_generator.state,
+                    self.simulator.noise_rng.bit_generator.state,
+                ) = v
+                return result
+
         D = self.D
         if root:
             D = np.sqrt(self.D)
@@ -211,13 +236,28 @@ class BlockEncodingModel:
                 "Can only evaluate even polynomials for squareroot of matrix"
             )
 
-        result = self.simulator.simulate_qsvt_folding(
-            D,
-            self.b,
-            angles,
-            samples,
-            self.noise_flips,
-            reference=exact / normalization,
+        result = (
+            self.simulator.simulate_qsvt_folding(
+                D,
+                self.b,
+                angles,
+                samples,
+                self.noise_flips,
+                reference=exact / normalization,
+            )
+            * normalization
         )
 
-        return normalization * result
+        self.cache.append(
+            (
+                p,
+                (
+                    result,
+                    self.simulator.calls,
+                    self.simulator.general_rng.bit_generator.state,
+                    self.simulator.noise_rng.bit_generator.state,
+                ),
+            )
+        )
+
+        return result
