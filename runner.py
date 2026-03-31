@@ -104,10 +104,10 @@ class Runner:
                         D, b, kappa=kappa, noise_flips=nf, seed=seed, **params
                     )
                     for seed, D, b, nf in zip(seeds[i], Ds[i], bs[i], noise_flips[i])
-                    for i, kappa in enumerate(kappas)
                 ],
             )
             for params in params_problem
+            for i, kappa in enumerate(kappas)
         ]
 
     def test_solver(
@@ -191,12 +191,14 @@ def _process_solver(p):
     A, (solver, params) = p
     A.reset()
     poly = solver(A, **params)
-    if params["square"]:
+    if params["transform"] == "square":
         X = np.polynomial.Chebyshev([0, 1])
         poly = poly(X * X)
+    if params["transform"] == "square_outer":
+        poly = poly**2
     error = A.estimate_error(
         poly,
         params["samples"],
-        params["square"],
+        params["transform"] in ["square", "square_outer"],
     )
     return error, A

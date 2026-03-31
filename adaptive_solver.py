@@ -9,12 +9,15 @@ from block_encoding_model import BlockEncodingModel
 # These functions are cached so that they only execute once
 # for each combination of parameters
 @cache
-def lagrange_basis(deg, square):
+def lagrange_basis(deg, transform):
     X = np.polynomial.Chebyshev([0, 1])
 
     domain = [-1, 1]
-    if square:
+    if transform == "square":
         domain = [0, 1]
+
+    if transform == "square_outer":
+        assert deg % 2 == 1
 
     N = deg + 1
 
@@ -22,11 +25,13 @@ def lagrange_basis(deg, square):
     full_poly = np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
 
     basis = []
-    for k in range(N):
+    for k in range(deg + 1):
         # k-th chebyshev node of the second kind
         xk = np.cos(k / (N - 1) * np.pi)
         poly = full_poly // (X - xk)
         poly /= poly(xk)
+        if transform == "square_outer":
+            poly -= poly(-X)
         basis.append(np.polynomial.Chebyshev(poly.coef, domain=domain))
 
     return basis
@@ -126,20 +131,31 @@ def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kapp
 
 
 def compute_polynomial(
-    A: BlockEncodingModel, steps, samples, square, sup_norm_constraint, use_kappa
+    A: BlockEncodingModel, steps, samples, transform, sup_norm_constraint, use_kappa
 ):
-    evs = estimate_eigenvalues(A, steps, samples, square, use_kappa)
+    evs = estimate_eigenvalues(A, steps, samples, transform == "square", use_kappa)
 
     if not sup_norm_constraint:
-        poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, len(evs) - 1, domain=[-1, 1])
+        if transform == "square_outer":
+            if len(evs) > (steps + 1) // 2:
+                evs = evs[: (steps + 1) // 2]
+            evs = np.concatenate((np.sqrt(evs), -np.sqrt(evs)))
+        deg = min(steps, len(evs) - 1)
+        poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, deg, domain=[-1, 1])
         return poly
 
     best_poly = None
 
     deg = steps
+    if transform == "square_outer":
+        evs = np.sqrt(evs)
+        if deg % 2 == 0:
+            deg -= 1
 
     while deg > 0:
-        lagrange = lagrange_basis(deg, square)
+        # For transform == "square_outer" the lagrange basis is already
+        # symmetrizised
+        lagrange = lagrange_basis(deg, transform)
         lagrange_at_evs = np.zeros((len(evs), deg + 1))
         for i, poly in enumerate(lagrange):
             lagrange_at_evs[:, i] = poly(evs)
@@ -176,6 +192,9 @@ def compute_polynomial(
             break
         best_poly = poly
 
-        deg -= 1
+        if transform == "square_outer":
+            deg -= 2
+        else:
+            deg -= 1
 
     return best_poly

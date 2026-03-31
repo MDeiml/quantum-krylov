@@ -4,15 +4,20 @@ import scipy as sp
 from block_encoding_model import BlockEncodingModel
 
 
-def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, square):
+def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, transform):
     X = np.polynomial.Chebyshev([0, 1])
     sq = X * X
+
+    kappa = A.kappa
+    if transform == "square_outer":
+        assert poly_kind in ["qsvt", "chebyshev_symmetric"]
+        kappa = np.sqrt(kappa)
 
     if poly_kind == "qsvt":
         coefficients = np.zeros(2 * steps + 2)
 
         accuracy = 2 / np.sqrt(samples)
-        b = int(np.ceil(A.kappa**2 * np.log(A.kappa / accuracy)))
+        b = int(np.ceil(kappa**2 * np.log(kappa / accuracy)))
         b = max(b, steps)
 
         for j in range(steps + 1):
@@ -23,7 +28,6 @@ def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, square)
         poly = np.polynomial.Chebyshev(coefficients)
     elif poly_kind in ["chebyshev_positive", "chebyshev_symmetric"]:
         poly = np.polynomial.Chebyshev([0] * steps + [0, 1])
-        kappa = A.kappa
         if poly_kind == "chebyshev_symmetric":
             kappa = kappa**2
         poly = poly((X - (1 / kappa + 1) / 2) / (1 - 1 / kappa) * 2)
