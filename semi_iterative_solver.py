@@ -4,13 +4,15 @@ import scipy as sp
 from block_encoding_model import BlockEncodingModel
 
 
-def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, transform):
+def semi_iterative_solver(
+    A: BlockEncodingModel, steps, samples, poly_kind, transform=None
+):
     X = np.polynomial.Chebyshev([0, 1])
     sq = X * X
 
     kappa = A.kappa
     if transform == "square_outer":
-        assert poly_kind in ["qsvt", "chebyshev_symmetric"]
+        assert poly_kind in ["qsvt", "q_cheb"]
         kappa = np.sqrt(kappa)
 
     if poly_kind == "qsvt":
@@ -26,14 +28,14 @@ def compute_polynomial(A: BlockEncodingModel, steps, samples, poly_kind, transfo
             )
 
         poly = np.polynomial.Chebyshev(coefficients)
-    elif poly_kind in ["chebyshev_positive", "chebyshev_symmetric"]:
+    elif poly_kind in ["cheb", "q_cheb"]:
         poly = np.polynomial.Chebyshev([0] * steps + [0, 1])
-        if poly_kind == "chebyshev_symmetric":
+        if poly_kind == "q_cheb":
             kappa = kappa**2
         poly = poly((X - (1 / kappa + 1) / 2) / (1 - 1 / kappa) * 2)
         poly = 1 - poly / poly(0)
 
-        if poly_kind == "chebyshev_symmetric":
+        if poly_kind == "q_cheb":
             poly = poly(sq)
 
         poly = poly // X

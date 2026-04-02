@@ -1,19 +1,13 @@
 [project]
-name = "cg"
+name = "quantum-krylov"
 version = "0.1.0"
-description = "Add your description here"
+description = "Implementation of the paper 'Krylov-based Quantum Linear System Solvers'"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "gitpython>=3.1.46",
-    "line-profiler>=5.0.1",
-    "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "scipy>=1.15.3",
+    "matplotlib>=3.10.8",
+    "gitpython>=3.1.46",
     "tqdm>=4.67.1",
-]
-
-[dependency-groups]
-dev = [
-    "ipykernel>=7.2.0",
 ]

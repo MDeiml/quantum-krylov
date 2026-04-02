@@ -72,12 +72,7 @@ def moment_to_gram(steps, square):
     return mat_E, mat_G
 
 
-def compute_moments(A: BlockEncodingModel, steps, samples, square):
-    """
-    Estimate moments of the form b^T p(A) b (if qoi = False)
-    or m^T p(A) b (if qoi = True)
-    """
-
+def estimate_moments(A: BlockEncodingModel, steps, samples, square):
     max_degree = 2 * steps + 1
 
     moments = np.zeros(max_degree + 1)
@@ -96,7 +91,7 @@ def compute_moments(A: BlockEncodingModel, steps, samples, square):
 
 
 def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kappa):
-    moments = compute_moments(A, steps, samples, square)
+    moments = estimate_moments(A, steps, samples, square)
 
     # Compute lhs matrix and rhs vector
     mat_E, mat_G = moment_to_gram(steps, square)
@@ -130,8 +125,13 @@ def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kapp
     return eigenvalues
 
 
-def compute_polynomial(
-    A: BlockEncodingModel, steps, samples, transform, sup_norm_constraint, use_kappa
+def car_solver(
+    A: BlockEncodingModel,
+    steps,
+    samples,
+    transform=None,
+    sup_norm_constraint=True,
+    use_kappa=True,
 ):
     evs = estimate_eigenvalues(A, steps, samples, transform == "square", use_kappa)
 

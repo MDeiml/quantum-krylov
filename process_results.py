@@ -1,121 +1,166 @@
 import subprocess
 import git
-import itertools
+import numpy as np
 
-# repo = git.Repo(search_parent_directories=True)
-# commit_hash = repo.head.object.hexsha
-# if repo.is_dirty():
-#     commit_hash += "_modified"
+repo = git.Repo(search_parent_directories=True)
+commit_hash = repo.head.object.hexsha
+if repo.is_dirty():
+    commit_hash += "_modified"
 
-commit_hash = "24e44ca4b45806ad3ef0a394b730cd5fe823b9de"
+kappa = 3
+
 
 def sqlite(sql, output=None) -> str:
     if output is None:
-        result = subprocess.run(["sqlite3", "-cmd", ".mode csv", "-cmd", '.separator ";"', "-cmd", f".import results/adaptive_{commit_hash}.csv adaptive", "-cmd", f".import results/static_{commit_hash}.csv static", "-cmd", sql, "-cmd", ".quit"], capture_output=True)
+        result = subprocess.run(
+            [
+                "sqlite3",
+                "-cmd",
+                ".mode csv",
+                "-cmd",
+                '.separator ";"',
+                "-cmd",
+                f".import results/car_{commit_hash}.csv car",
+                "-cmd",
+                f".import results/semi_iterative_{commit_hash}.csv semi_iterative",
+                "-cmd",
+                sql,
+                "-cmd",
+                ".quit",
+            ],
+            capture_output=True,
+        )
         if len(result.stderr) > 0:
             print(result.stderr.decode("utf8"))
         return result.stdout.decode("utf8")
     else:
-        result = subprocess.run(["sqlite3", "-cmd", ".mode csv --titles on", "-cmd", '.separator ";"', "-cmd", f".import results/adaptive_{commit_hash}.csv adaptive", "-cmd", f".import results/static_{commit_hash}.csv static", "-cmd", f".output {output}", "-cmd", sql, "-cmd", ".quit"], capture_output=True)
+        result = subprocess.run(
+            [
+                "sqlite3",
+                "-cmd",
+                ".mode csv --titles on",
+                "-cmd",
+                '.separator ";"',
+                "-cmd",
+                f".import results/car_{commit_hash}.csv car",
+                "-cmd",
+                f".import results/semi_iterative_{commit_hash}.csv semi_iterative",
+                "-cmd",
+                f".output {output}",
+                "-cmd",
+                sql,
+                "-cmd",
+                ".quit",
+            ],
+            capture_output=True,
+        )
         if len(result.stderr) > 0:
             print(result.stderr.decode("utf8"))
 
 
-problems = [l.split(";") for l in sqlite("select distinct noise, samples from adaptive union select distinct noise, samples from static").splitlines()]
+problems = [
+    line.split(";")
+    for line in sqlite(
+        f"select distinct noise, samples from car where kappa={kappa} union select distinct noise, samples from semi_iterative where kappa={kappa}"
+    ).splitlines()
+]
 
 for problem in problems:
     problem_name = "_".join(problem)
-    params = [l.split(";") for l in sqlite("select distinct sup_norm_constraint, square, use_kappa from adaptive").splitlines()]
+    params = [
+        line.split(";")
+        for line in sqlite(
+            f"select distinct sup_norm_constraint, transform, use_kappa from car where car.kappa={kappa}"
+        ).splitlines()
+    ]
 
     select = "select c.steps"
-    table = " from (select distinct steps from adaptive union select distinct steps from static) as c"
+    table = " from (select distinct steps from car union select distinct steps from semi_iterative) as c"
     for i, p in enumerate(params):
-        column_name = "_".join(["adaptive"] + p)
+        column_name = "_".join(["car"] + p)
         select += f", a{i}.complexity as {column_name}_complexity"
-        select += f", a{i}.'error 0 percentile' as {column_name}_0"
+        select += f", a{i}.'error 5 percentile' as {column_name}_5"
         select += f", a{i}.'error 50 percentile' as {column_name}_50"
-        select += f", a{i}.'error 100 percentile' as {column_name}_100"
-        table += f" left join adaptive as a{i} on a{i}.steps = c.steps and a{i}.sup_norm_constraint='{p[0]}' and a{i}.square='{p[1]}' and a{i}.use_kappa='{p[2]}' and a{i}.noise={problem[0]} and a{i}.samples={problem[1]}"
+        select += f", a{i}.'error 95 percentile' as {column_name}_95"
+        table += f" left join car as a{i} on a{i}.steps = c.steps and a{i}.sup_norm_constraint='{p[0]}' and a{i}.transform='{p[1]}' and a{i}.use_kappa='{p[2]}' and a{i}.noise={problem[0]} and a{i}.samples={problem[1]} and a{i}.kappa={kappa}"
 
-    params = [l.split(";") for l in sqlite("select distinct poly_kind, square from static").splitlines()]
+    params = [
+        line.split(";")
+        for line in sqlite(
+            "select distinct poly_kind, transform from semi_iterative"
+        ).splitlines()
+    ]
 
     for i, p in enumerate(params):
         column_name = "_".join(p)
         select += f", n{i}.complexity as {column_name}_complexity"
-        select += f", n{i}.'error 0 percentile' as {column_name}_0"
+        select += f", n{i}.'error 5 percentile' as {column_name}_5"
         select += f", n{i}.'error 50 percentile' as {column_name}_50"
-        select += f", n{i}.'error 100 percentile' as {column_name}_100"
-        table += f" left join static as n{i} on n{i}.steps = c.steps and n{i}.poly_kind='{p[0]}' and n{i}.square='{p[1]}' and n{i}.noise={problem[0]} and n{i}.samples={problem[1]}"
+        select += f", n{i}.'error 95 percentile' as {column_name}_95"
+        table += f" left join semi_iterative as n{i} on n{i}.steps = c.steps and n{i}.poly_kind='{p[0]}' and n{i}.transform='{p[1]}' and n{i}.noise={problem[0]} and n{i}.samples={problem[1]} and n{i}.kappa={kappa}"
 
     sqlite(select + table, f"processed_results/{problem_name}.csv")
 
-noises = [0, 0.01, 0.02]
+# noises = [0, 0.0025, 0.005]
+noises = [0.01, 0.02, 0.04]
 samples = [10000, 40000, 160000]
-poly_kind = {
-    "qsvt": "$P_\\qsvt$",
-    "chebyshev_positive": "$P_\\cheb$",
-    "chebyshev_symmetric": "$P_\\chebsym$",
+noises = [0, 0.0025, 0.005, 0.01, 0.02, 0.04]
+samples = [160000]
+solvers = {
+    "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='qsvt'",
+    "$\\cheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_positive'",
+    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_symmetric'",
+    "CAR": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='None' and sup_norm_constraint='True' and use_kappa='True'",
+    "$\\qsvt_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='qsvt'",
+    "$\\cheb_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='chebyshev_positive'",
+    "$\\chebsym_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='chebyshev_symmetric'",
+    "CAR${}_\\mathrm{sq}$": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='square' and sup_norm_constraint='True' and use_kappa='True'",
+    "$\\qsvt_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='qsvt'",
+    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='chebyshev_symmetric'",
+    "CAR${}_\\mathrm{sq}'$": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='square_outer' and sup_norm_constraint='True' and use_kappa='True'",
 }
-sup_norm_constraint = [False, True]
+solvers = {
+    "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='qsvt'",
+    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_symmetric'",
+    "CAR": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='None' and sup_norm_constraint='True' and use_kappa='True'",
+    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='chebyshev_symmetric'",
+    "CAR${}_\\mathrm{sq}$": "select steps, car.'error 50 percentile', 2 * noise as noise, samples, kappa from car where transform='square' and sup_norm_constraint='True' and use_kappa='True'",
+}
+
+errors = np.zeros((len(solvers), len(noises), len(samples)), dtype=float)
+errors[:] = np.inf
+steps = np.zeros_like(errors, dtype=int)
+steps[:] = -1
 
 output = ""
 
-for p in poly_kind.keys():
-    output += poly_kind[p]
-    output += " & $\\times$ & --"
-    for n, s in itertools.product(noises, samples):
-        sql = f"select min(static.'error 50 percentile'), steps from static where noise={n} and samples={s} and square='False' and poly_kind='{p}'"
-        result = sqlite(sql)
-        [error, steps] = result.strip().split(";")
-        try:
-            error = f"{float(error):.3f}"
-        except ValueError:
-            pass
-        output += f" & {error}({steps})"
-    output += " \\\\\n"
+for i, name in enumerate(solvers.keys()):
+    for j, n in enumerate(noises):
+        for k, s in enumerate(samples):
+            sql = f"select min(t.'error 50 percentile'), steps from ({solvers[name]}) as t where noise={n} and samples={s} and kappa={kappa}"
+            result = sqlite(sql)
+            [error, step] = result.strip().split(";")
+            try:
+                errors[i, j, k] = error
+                steps[i, j, k] = step
+            except ValueError:
+                pass
 
-for c in sup_norm_constraint:
-    output += "adaptive"
-    output += " & $\\times$"
-    output += " & $\\checkmark$" if c else " & $\\times$"
-    for n, s in itertools.product(noises, samples):
-        sql = f"select min(adaptive.'error 50 percentile'), steps from adaptive where noise={n} and samples={s} and square='False' and sup_norm_constraint='{c}'"
-        result = sqlite(sql)
-        [error, steps] = result.strip().split(";")
-        try:
+for i, name in enumerate(solvers.keys()):
+    output += name
+    for j, n in enumerate(noises):
+        for k, s in enumerate(samples):
+            error = errors[i, j, k]
+            step = steps[i, j, k]
+            if step == -1:
+                output += " & --"
+                continue
+            best = i == np.argmin(errors[:, j, k])
             error = f"{float(error):.3f}"
-        except ValueError:
-            pass
-        output += f" & {error}({steps})"
-    output += " \\\\\n"
-
-for p in poly_kind.keys():
-    output += poly_kind[p]
-    output += " & $\\checkmark$ & --"
-    for n, s in itertools.product(noises, samples):
-        sql = f"select min(static.'error 50 percentile'), steps from static where noise={n} and samples={s} and square='True' and poly_kind='{p}'"
-        result = sqlite(sql)
-        [error, steps] = result.strip().split(";")
-        try:
-            error = f"{float(error):.3f}"
-        except ValueError:
-            pass
-        output += f" & {error}({steps})"
-    output += " \\\\\n"
-
-for c in sup_norm_constraint:
-    output += "adaptive"
-    output += " & $\\checkmark$"
-    output += " & $\\checkmark$" if c else " & $\\times$"
-    for n, s in itertools.product(noises, samples):
-        sql = f"select min(adaptive.'error 50 percentile'), steps from adaptive where noise={n} and samples={s} and square='True' and sup_norm_constraint='{c}'"
-        result = sqlite(sql)
-        [error, steps] = result.strip().split(";")
-        try:
-            error = f"{float(error):.3f}"
-        except ValueError:
-            pass
-        output += f" & {error}({steps})"
+            if best:
+                output += f" & \\textbf{{{error}({step})}}"
+            else:
+                output += f" & {error}({step})"
     output += " \\\\\n"
 
 print(output)
