@@ -108,22 +108,22 @@ noises = [0, 0.0025, 0.005, 0.01, 0.02, 0.04]
 samples = [160000]
 solvers = {
     "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='qsvt'",
-    "$\\cheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_positive'",
-    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_symmetric'",
+    "$\\cheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='cheb'",
+    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='q_cheb'",
     "CAR": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='None' and sup_norm_constraint='True' and use_kappa='True'",
     "$\\qsvt_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='qsvt'",
-    "$\\cheb_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='chebyshev_positive'",
-    "$\\chebsym_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='chebyshev_symmetric'",
+    "$\\cheb_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='cheb'",
+    "$\\chebsym_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square' and poly_kind='q_cheb'",
     "CAR${}_\\mathrm{sq}$": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='square' and sup_norm_constraint='True' and use_kappa='True'",
     "$\\qsvt_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='qsvt'",
-    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='chebyshev_symmetric'",
+    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='q_cheb'",
     "CAR${}_\\mathrm{sq}'$": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='square_outer' and sup_norm_constraint='True' and use_kappa='True'",
 }
 solvers = {
     "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='qsvt'",
-    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='chebyshev_symmetric'",
+    "$\\chebsym$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa from semi_iterative where transform='None' and poly_kind='q_cheb'",
     "CAR": "select steps, car.'error 50 percentile', noise, samples, kappa from car where transform='None' and sup_norm_constraint='True' and use_kappa='True'",
-    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='chebyshev_symmetric'",
+    "$\\chebsym_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa from semi_iterative where transform='square_outer' and poly_kind='q_cheb'",
     "CAR${}_\\mathrm{sq}$": "select steps, car.'error 50 percentile', 2 * noise as noise, samples, kappa from car where transform='square' and sup_norm_constraint='True' and use_kappa='True'",
 }
 

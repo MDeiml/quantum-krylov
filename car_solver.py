@@ -122,6 +122,8 @@ def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kapp
             break
         cutoff_index += 1
 
+    print(eigenvalues)
+
     return eigenvalues
 
 

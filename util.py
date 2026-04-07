@@ -17,7 +17,7 @@ def sup_norm(poly, range=(-1.0, 1.0)):
     """
 
     extrema = poly.deriv().roots()
-    extrema = extrema[np.logical_and(extrema > range[0], extrema < range[1])]
+    extrema = extrema[np.logical_and(extrema > range[0], extrema < range[1], np.abs(extrema.imag) < 1e-5)].real
     extrema = np.concatenate((extrema, [range[0], range[1]]))
 
     return np.max(np.abs(poly(extrema)))
