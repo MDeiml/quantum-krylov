@@ -504,8 +504,8 @@ class BlockEncodingModel:
             return 0
         max_probability = np.max(probabilities)
         min_probability = np.min(probabilities)
-        assert min_probability >= 0 and max_probability - 1 < 1e-4, (
+        assert min_probability >= -1e-4 and max_probability - 1 < 1e-4, (
             f"probabilities [{min_probability}, {max_probability}] are not between 0 and 1"
         )
-        probabilities = np.minimum(samples, probabilities)
+        probabilities = np.maximum(0, np.minimum(1, probabilities))
         return np.sum(self.general_rng.binomial(samples, probabilities), axis=0)

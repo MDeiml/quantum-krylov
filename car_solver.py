@@ -6,72 +6,6 @@ import scipy as sp
 from block_encoding_model import BlockEncodingModel
 
 
-# These functions are cached so that they only execute once
-# for each combination of parameters
-@cache
-def lagrange_basis(deg, transform):
-    X = np.polynomial.Chebyshev([0, 1])
-
-    domain = [-1, 1]
-    if transform == "square":
-        domain = [0, 1]
-
-    if transform == "square_outer":
-        assert deg % 2 == 1
-
-    N = deg + 1
-
-    # Polynomial with roots at all interpolation points
-    full_poly = np.polynomial.Chebyshev((N - 1) * [0] + [1]).deriv() * (X - 1) * (X + 1)
-
-    basis = []
-    for k in range(deg + 1):
-        # k-th chebyshev node of the second kind
-        xk = np.cos(k / (N - 1) * np.pi)
-        poly = full_poly // (X - xk)
-        poly /= poly(xk)
-        if transform == "square_outer":
-            poly -= poly(-X)
-        basis.append(np.polynomial.Chebyshev(poly.coef, domain=domain))
-
-    return basis
-
-
-@cache
-def moment_to_gram(steps, square):
-    max_degree = 2 * steps + 1
-
-    X = np.polynomial.Chebyshev([0, 1])
-    if square:
-        X = X * X
-
-    mat_E = np.zeros((steps + 1, steps + 1, max_degree + 1))
-    mat_G = np.zeros((steps + 1, steps + 1, max_degree + 1))
-    for i in range(steps + 1):
-        if square:
-            poly_i = np.polynomial.Chebyshev([0] * (2 * i) + [1])
-        else:
-            poly_i = np.polynomial.Chebyshev([0] * i + [1])
-
-        for j in range(steps + 1):
-            if square:
-                poly_j = np.polynomial.Chebyshev([0] * (2 * j) + [1])
-            else:
-                poly_j = np.polynomial.Chebyshev([0] * j + [1])
-            poly_E = poly_i * poly_j
-            poly_G = X * poly_E
-            if square:
-                # Moments are only even degrees, other coefficients of poly_E
-                # and poly_G will be zero anyways
-                mat_E[i, j, : poly_E.degree() // 2 + 1] = poly_E.coef[::2]
-                mat_G[i, j, : poly_G.degree() // 2 + 1] = poly_G.coef[::2]
-            else:
-                mat_E[i, j, : poly_E.degree() + 1] = poly_E.coef
-                mat_G[i, j, : poly_G.degree() + 1] = poly_G.coef
-
-    return mat_E, mat_G
-
-
 def estimate_moments(A: BlockEncodingModel, steps, samples, square):
     max_degree = 2 * steps + 1
 
@@ -90,41 +24,57 @@ def estimate_moments(A: BlockEncodingModel, steps, samples, square):
     return moments
 
 
-def estimate_eigenvalues(A: BlockEncodingModel, steps, samples, square, use_kappa):
-    moments = estimate_moments(A, steps, samples, square)
+def gauss_quadrature(kappa):
+    # TODO: Variably choose number of quadrature points
+    xq, wq = np.polynomial.legendre.leggauss(100)
+    # return xq, wq
+    return (xq + 1) / 2 * (1 - 1 / kappa) + 1 / kappa, wq / 2 * (1 - 1 / kappa)
 
-    # Compute lhs matrix and rhs vector
-    mat_E, mat_G = moment_to_gram(steps, square)
-    E = mat_E @ moments
-    G = mat_G @ moments
 
-    # First remove directions corresponding to small eigenvalues of G
-    accuracy = 2 / np.sqrt(samples)
-    eigenvalues_E, eigenvectors_E = sp.linalg.eigh(E)
-    eval_max = eigenvalues_E[-1]
-    cutoff_index = np.searchsorted(eigenvalues_E, eval_max * accuracy)
-    min_allowed_ev = accuracy
-    if use_kappa:
-        min_allowed_ev = 1 / A.kappa
+def cheb_at(max_degree, xs):
+    result = np.zeros((len(xs), max_degree + 1))
+    for i in range(max_degree + 1):
+        result[:, i] = np.cos(i * np.arccos(xs))
 
-    # Then, if there are still negative eigenvalues, continuously remove the smallest eigenvalue
-    while True:
-        P = (
-            np.diag(1 / np.sqrt(eigenvalues_E[cutoff_index:]))
-            @ eigenvectors_E[:, cutoff_index:].T
-        )
-        G_sub = P @ G @ P.T
-        eigenvalues, eigenvectors = sp.linalg.eigh(G_sub)
-        if (
-            np.min(eigenvalues) >= min_allowed_ev
-            or cutoff_index == len(eigenvalues_E) - 1
-        ):
-            break
-        cutoff_index += 1
+    return result
 
-    print(eigenvalues)
 
-    return eigenvalues
+@cache
+def cheb_at_xq(max_degree, kappa, square):
+    xq, _wq = gauss_quadrature(kappa)
+    if square:
+        # If estimate_moments is used with square=True, then
+        # the moments correspond to the polynomials
+        # T_{2n}(sqrt(x)) = T_n(2x - 1)
+        xq = xq * 2 - 1
+    return cheb_at(max_degree, xq)
+
+
+def maximum_entropy_measure(moments, kappa, square):
+    p0 = np.zeros_like(moments)
+
+    xq, wq = gauss_quadrature(kappa)
+    cheb_q = cheb_at_xq(len(moments) - 1, kappa, False)
+
+    # Moments at xq
+    moments_at_xq = cheb_at_xq(len(moments) - 1, kappa, square)
+
+    def objective(p):
+        # rho at quadrature points
+        rho_q = np.exp(cheb_q @ p)
+        moments_p = moments_at_xq.T @ (wq * rho_q)
+
+        residual = moments_p - moments
+        fun = 0.5 * np.dot(residual, residual)
+
+        gradient = cheb_q.T @ ((moments_at_xq @ residual) * wq * rho_q)
+
+        return fun, gradient
+
+    res = sp.optimize.minimize(objective, p0, jac=True)
+    p = res.x
+
+    return np.polynomial.Chebyshev(p)
 
 
 def car_solver(
@@ -132,71 +82,104 @@ def car_solver(
     steps,
     samples,
     transform=None,
-    sup_norm_constraint=True,
-    use_kappa=True,
+    adaptive=True,
 ):
-    evs = estimate_eigenvalues(A, steps, samples, transform == "square", use_kappa)
+    square = transform == "square"
+    if adaptive:
+        moments = estimate_moments(A, steps, samples, square)
+        rho_poly = maximum_entropy_measure(moments, A.kappa, square)
+    else:
+        rho_poly = np.polynomial.Chebyshev([1 / (1 - 1 / A.kappa)])
+    xq, wq = gauss_quadrature(A.kappa)
+    rho_q = np.exp(rho_poly(xq))
 
-    if not sup_norm_constraint:
-        if transform == "square_outer":
-            if len(evs) > (steps + 1) // 2:
-                evs = evs[: (steps + 1) // 2]
-            evs = np.concatenate((np.sqrt(evs), -np.sqrt(evs)))
-        deg = min(steps, len(evs) - 1)
-        poly = np.polynomial.Chebyshev.fit(evs, 1 / evs, deg, domain=[-1, 1])
-        return poly
+    noise_level = 2 / np.sqrt(samples)
 
-    best_poly = None
+    cheb_q = cheb_at_xq(steps, A.kappa, False)
+    x_sup = np.cos(np.linspace(0, np.pi, 2 * steps))
+    if square:
+        # If transform == "square" then the normalization
+        # is exactly the sup norm over positive values
+        x_sup = (x_sup + 1) / 2
+        cheb_at_x_sup = cheb_at(steps, x_sup)
+        constraint = np.zeros((4, len(x_sup), cheb_q.shape[1] + 2))
+        constraint[0, :, 0] = 1
+        constraint[0, :, 2:] = -cheb_at_x_sup
+        constraint[1, :, 0] = 1
+        constraint[1, :, 2:] = cheb_at_x_sup
+        constraint = constraint.reshape((-1, cheb_q.shape[1] + 2))
+    elif transform == "square_outer":
+        # If transform == "square_outer", we have to look
+        # for an odd polynomial, and the measure is transformed
+        # by a square.
+        # The normalization is the sup norm over [-1, 1].
+        xq, wq = gauss_quadrature(np.sqrt(A.kappa))
+        rho_q = np.exp(rho_poly(xq ** 2))
+        cheb_q = cheb_at_xq(steps, np.sqrt(A.kappa), False)[:, 1::2]
+        cheb_at_x_sup = cheb_at(steps, x_sup)[:, 1::2]
+        constraint = np.zeros((4, len(x_sup), cheb_q.shape[1] + 2))
+        constraint[0, :, 0] = 1
+        constraint[0, :, 2:] = -cheb_at_x_sup
+        constraint[1, :, 0] = 1
+        constraint[1, :, 2:] = cheb_at_x_sup
+        constraint = constraint.reshape((-1, cheb_q.shape[1] + 2))
+    else:
+        # Otherwise the normalization is the sup norm (over
+        # all values in [-1, 1]) for the odd part plus the
+        # sup norm of the even part
+        cheb_at_x_sup = cheb_at(steps, x_sup)
+        cheb_at_x_sup_even = cheb_at_x_sup.copy()
+        cheb_at_x_sup_even[:, 1::2] = 0
+        cheb_at_x_sup_odd = cheb_at_x_sup.copy()
+        cheb_at_x_sup_odd[:, ::2] = 0
+        constraint = np.zeros((4, len(x_sup), cheb_q.shape[1] + 2))
+        constraint[0, :, 0] = 1
+        constraint[0, :, 2:] = -cheb_at_x_sup_even
+        constraint[1, :, 0] = 1
+        constraint[1, :, 2:] = cheb_at_x_sup_even
+        constraint[2, :, 1] = 1
+        constraint[2, :, 2:] = -cheb_at_x_sup_odd
+        constraint[3, :, 1] = 1
+        constraint[3, :, 2:] = cheb_at_x_sup_odd
+        constraint = constraint.reshape((-1, cheb_q.shape[1] + 2))
 
-    deg = steps
-    if transform == "square_outer":
-        evs = np.sqrt(evs)
-        if deg % 2 == 0:
-            deg -= 1
+    hess = cheb_q.T @ np.diag(rho_q * wq) @ cheb_q
+    c = cheb_q.T @ np.diag(rho_q * wq) @ (1 / xq)
 
-    while deg > 0:
-        # For transform == "square_outer" the lagrange basis is already
-        # symmetrizised
-        lagrange = lagrange_basis(deg, transform)
-        lagrange_at_evs = np.zeros((len(evs), deg + 1))
-        for i, poly in enumerate(lagrange):
-            lagrange_at_evs[:, i] = poly(evs)
+    def f(coef):
+        return (
+            0.5 * coef[2:].T @ hess @ coef[2:]
+            - c.T @ coef[2:]
+            + 0.5 * (coef[0] + coef[1]) ** 2 * noise_level
+        )
 
-        hess = lagrange_at_evs.T @ lagrange_at_evs
-        c = lagrange_at_evs.T @ (1 / evs)
+    def Df(coef):
+        return np.concatenate(
+            (
+                [
+                    noise_level * (coef[0] + coef[1]),
+                    noise_level * (coef[0] + coef[1]),
+                ],
+                hess @ coef[2:] - c,
+            )
+        )
 
-        def f(coef):
-            return 0.5 * coef.T @ hess @ coef - c.T @ coef
-
-        def Df(coef):
-            return hess @ coef - c
-
-        # We do not want to keep the bound exactly
-        relaxation_factor = 1.2
-        # Account for evs being negative, which should only happen very seldomly
-        min_ev = max(np.min(evs), 0.001)
-        bound = relaxation_factor / min_ev
-
+    if noise_level == 0:
+        coef = np.linalg.solve(hess, c)
+    else:
         res = sp.optimize.minimize(
             f,
-            np.zeros(deg + 1),
+            np.zeros(cheb_q.shape[1] + 2),
             jac=Df,
-            bounds=[(-bound, bound)] * (deg + 1),
+            constraints=[
+                sp.optimize.LinearConstraint(constraint, lb=0, ub=np.inf),
+            ],
         )
-        poly = sum([res.x[i] * lagrange[i] for i in range(deg + 1)])
+        coef = res.x[2:]
+    if transform == "square_outer":
+        temp = coef
+        coef = np.zeros(steps + 1)
+        coef[1::2] = temp
+    poly = np.polynomial.Chebyshev(coef)
 
-        # If the points are interpolated exactly, reduce the polynomial degree
-        # until there is some error, and return the smallest polynomial that has
-        # zero error.
-        if res.fun + 0.5 * np.dot(1 / evs, 1 / evs) > 1e-6:
-            if best_poly is None:
-                best_poly = poly
-            break
-        best_poly = poly
-
-        if transform == "square_outer":
-            deg -= 2
-        else:
-            deg -= 1
-
-    return best_poly
+    return poly

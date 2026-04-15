@@ -18,7 +18,10 @@ def semi_iterative_solver(
     if poly_kind == "qsvt":
         coefficients = np.zeros(2 * steps + 2)
 
-        accuracy = 2 / np.sqrt(samples)
+        if samples == np.inf:
+            accuracy = min(0.1, np.exp(-steps / kappa))
+        else:
+            accuracy = 2 / np.sqrt(samples)
         b = int(np.ceil(kappa**2 * np.log(kappa / accuracy)))
         b = max(b, steps)
 

@@ -15,7 +15,6 @@ runner.test_solver(
         "steps": range(1, 17),
         "samples": [10000, 40000, 160000],
         "transform": [None, "square_outer", "square"],
-        "use_kappa": [False, True],
-        "sup_norm_constraint": [False, True],
+        "adaptive": [True, False],
     },
 )
