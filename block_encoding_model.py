@@ -252,7 +252,7 @@ class BlockEncodingModel:
             )
 
         result = (
-            self._simulate_qsvt_folding(
+            self._simulate_qsvt_bending(
                 B,
                 angles,
                 samples,
@@ -275,7 +275,7 @@ class BlockEncodingModel:
 
         return result
 
-    def _simulate_qsvt_folding(
+    def _simulate_qsvt_bending(
         self,
         B: np.ndarray,
         angles: np.ndarray,
@@ -444,7 +444,7 @@ class BlockEncodingModel:
                 if i == duration - 1:
                     for k, angles in enumerate(angle_sequences):
                         if (len(angles) - 1) % 2 == duration % 2:
-                            # For non-folding case, apply the last unitary if the
+                            # For non-bending case, apply the last unitary if the
                             # polynomial has the same partiy as the longest polynomial
 
                             np.multiply(

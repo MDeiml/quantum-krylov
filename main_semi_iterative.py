@@ -4,6 +4,7 @@ from semi_iterative_solver import semi_iterative_solver
 params_problem = {
     "noise": [0, 0.0025, 0.005, 0.01, 0.02, 0.04],
     "kappa": [3, 5],
+    "num_clusters": [None, 4],
 }
 
 runner = Runner(params_problem)

@@ -40,9 +40,9 @@ class Runner:
         params_problem: dict,
         tries: int = 200,
         error_percentiles: list[float] = [0, 5, 50, 95, 100],
-        condition_bound_inaccuaracy=0.1,
         dim: int = 128,
         num_processes: int | None = None,
+        seed: int = 0,
     ):
         self.tries = tries
         self.error_percentiles = error_percentiles
@@ -62,52 +62,83 @@ class Runner:
             self.commit_hash += "_modified"
 
         print("Generating problems...")
-        seed_sequence = np.random.SeedSequence(0)
-        global_rng = np.random.default_rng(seed_sequence.spawn(1)[0])
+        seed_sequence = np.random.SeedSequence(seed)
+        problem_seed, noise_flip_seed = seed_sequence.spawn(2)
 
         # Generate bs and Ds
         kappas = params_problem["kappa"]
+        num_clusters_list = params_problem["num_clusters"]
         del params_problem["kappa"]
-        Ds = np.zeros((len(kappas), tries, dim))
-        bs = np.zeros((len(kappas), tries, dim))
+        del params_problem["num_clusters"]
+        Ds = np.zeros((len(kappas), len(num_clusters_list), tries, dim))
+        bs = np.zeros((len(kappas), len(num_clusters_list), tries, dim))
         for i, kappa in enumerate(kappas):
-            smin = global_rng.uniform(
-                1 / kappa, 1 / kappa / (1 - condition_bound_inaccuaracy), tries
-            )
-            Ds[i] = global_rng.uniform(smin[:, np.newaxis], 1, (tries, dim))
-            bs[i] = global_rng.normal(size=(tries, dim))
-            for j in range(tries):
-                norm = np.linalg.norm(bs[i, j])
-                assert norm > 1e-4
-                bs[i, j] /= norm
+            for j, num_clusters in enumerate(num_clusters_list):
+                problem_rng = np.random.default_rng(problem_seed)
+                if num_clusters is not None:
+                    cluster_size = 0.1
+                    clusters = problem_rng.uniform(1 / kappa, 1, (tries, num_clusters))
+                    cluster_index = problem_rng.integers(
+                        0, num_clusters, size=(tries, dim)
+                    )
+                    Ds[i, j] = problem_rng.normal(
+                        0,
+                        cluster_size * (1 - 1 / kappa) / num_clusters,
+                        size=(tries, dim),
+                    )
+                    Ds[i, j] += np.take_along_axis(clusters, cluster_index, axis=1)
+                    Ds[i, j] = np.maximum(1 / kappa, np.minimum(1, Ds[i, j]))
+                else:
+                    Ds[i, j] = problem_rng.uniform(1 / kappa, 1, (tries, dim))
+                bs[i, j] = problem_rng.normal(size=(tries, dim))
+                for k in range(tries):
+                    norm = np.linalg.norm(bs[i, j, k])
+                    assert norm > 1e-4
+                    bs[i, j, k] /= norm
 
+        noise_flip_rng = np.random.default_rng(noise_flip_seed)
         noise_flips_per_problem = 20
         noise_flips = generate_noise_flips(
-            global_rng, dim, len(kappas) * tries * noise_flips_per_problem
+            noise_flip_rng,
+            dim,
+            len(kappas) * len(num_clusters_list) * tries * noise_flips_per_problem,
         )
         noise_flips = noise_flips.reshape(
-            (len(kappas), tries, noise_flips_per_problem, 2 * dim, 2 * dim)
+            (
+                len(kappas),
+                len(num_clusters_list),
+                tries,
+                noise_flips_per_problem,
+                2 * dim,
+                2 * dim,
+            )
         )
 
-        self.params_problem_names = list(params_problem.keys()) + ["kappa"]
+        self.params_problem_names = list(params_problem.keys()) + [
+            "kappa",
+            "num_clusters",
+        ]
         params_problem = list(
             dict(zip(params_problem.keys(), x))
             for x in itertools.product(*params_problem.values())
         )
 
-        seeds = [seed_sequence.spawn(tries) for _ in kappas]
+        seeds = seed_sequence.spawn(tries)
         self.problems = [
             (
-                params | {"kappa": kappa},
+                params | {"kappa": kappa, "num_clusters": num_clusters},
                 [
                     BlockEncodingModel(
                         D, b, kappa=kappa, noise_flips=nf, seed=seed, **params
                     )
-                    for seed, D, b, nf in zip(seeds[i], Ds[i], bs[i], noise_flips[i])
+                    for seed, D, b, nf in zip(
+                        seeds, Ds[i, j], bs[i, j], noise_flips[i, j]
+                    )
                 ],
             )
             for params in params_problem
             for i, kappa in enumerate(kappas)
+            for j, num_clusters in enumerate(num_clusters_list)
         ]
 
     def test_solver(

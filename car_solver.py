@@ -143,8 +143,8 @@ def car_solver(
         constraint[3, :, 2:] = cheb_at_x_sup_odd
         constraint = constraint.reshape((-1, cheb_q.shape[1] + 2))
 
-    hess = cheb_q.T @ np.diag(rho_q * wq) @ cheb_q
-    c = cheb_q.T @ np.diag(rho_q * wq) @ (1 / xq)
+    hess = cheb_q.T @ np.diag(rho_q * wq * xq) @ cheb_q
+    c = np.dot(cheb_q.T, rho_q * wq)
 
     def f(coef):
         return (
@@ -181,5 +181,9 @@ def car_solver(
         coef = np.zeros(steps + 1)
         coef[1::2] = temp
     poly = np.polynomial.Chebyshev(coef)
+
+    # from util import plot_poly
+
+    # plot_poly([poly, lambda x: (x > 1/A.kappa) * np.exp(rho_poly(x))], A)
 
     return poly
