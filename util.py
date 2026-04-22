@@ -23,7 +23,7 @@ def sup_norm(poly, range=(-1.0, 1.0)):
     return np.max(np.abs(poly(extrema)))
 
 
-def plot_poly(polys, A, square=False):
+def plot_poly(polys, A, root=False):
     import matplotlib.pyplot as plt
 
     colors = ["#0087c1", "#f6a800"]
@@ -32,8 +32,8 @@ def plot_poly(polys, A, square=False):
     xs = np.linspace(-1, 1)
     ys_max = 0
     for i, poly in enumerate(polys):
-        if square:
-            ys = poly(xs**2)
+        if root:
+            ys = poly(np.sqrt(np.abs(xs)))
         else:
             ys = poly(xs)
         ys_max = max(ys_max, np.max(np.abs(ys)))

@@ -71,13 +71,15 @@ def maximum_entropy_measure(moments, kappa, square):
 
         return fun, gradient
 
-    res = sp.optimize.minimize(objective, p0, jac=True)
+    # Prevent infinty
+    max_coef = np.log(np.finfo(float).max) / len(moments) / 2
+    res = sp.optimize.minimize(objective, p0, jac=True, bounds=[(-max_coef, max_coef)])
     p = res.x
 
     return np.polynomial.Chebyshev(p)
 
 
-def car_solver(
+def cap_solver(
     A: BlockEncodingModel,
     steps,
     samples,
