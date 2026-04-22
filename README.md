@@ -30,4 +30,4 @@ The files have the following contents
 
 If you use this code, please cite our paper.
 
-[zotero]: tbd
+[zotero]: https://doi.org/10.5281/zenodo.19694861
