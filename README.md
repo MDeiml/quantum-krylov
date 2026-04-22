@@ -7,6 +7,8 @@ All random generators are seeded, so running the code should produce the exact s
 
 ## Usage
 
+> ⚠️ The files `main_cap.py` and `main_semi_iterative.py` use a lot of RAM and CPU resources, since they are intended to be run on HPC devices, not latops, PCs, etc. You might want to modify the `Runner` constructor to limit the number of simultaneously tested equations, e.g. `Runner(..., tries=4)`.
+
 This code is written in Python and requires `numpy` and `scipy`. To use the `Runner` class, `tqdm` and `gitpython` are needed. For the examples, `matplotlib` is required. All dependencies can be installed using
 ```sh
 pip install --editable .
