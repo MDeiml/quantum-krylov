@@ -103,37 +103,42 @@ for problem in problems:
     sqlite(select + table, f"processed_results/{problem_name}.csv")
 
 noises = [0, 0.0025, 0.005]
-# noises = [0.01, 0.02, 0.04]
+noises = [0.01, 0.02, 0.04]
 samples = [10000, 40000, 160000]
 clusters = [num_clusters]
 solvers = {
     "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='qsvt'",
     "$\\cheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='cheb'",
     "$\\qcheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='q_cheb'",
+    "$\\chebopt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='chebopt'",
     "$\\cups$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='False'",
     "$\\caps$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='True'",
     "$\\qsvt_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square' and poly_kind='qsvt'",
     "$\\cheb_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square' and poly_kind='cheb'",
     "$\\qcheb_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square' and poly_kind='q_cheb'",
+    "$\\chebopt_\\mathrm{sq}$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square' and poly_kind='chebopt'",
     "$\\cups_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='False'",
     "$\\caps_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='True'",
     "$\\qsvt_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='qsvt'",
     "$\\qcheb_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='q_cheb'",
+    "$\\chebopt_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='chebopt'",
     "$\\cups_\\mathrm{sq}'$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='square_outer' and adaptive='False'",
     "$\\caps_\\mathrm{sq}'$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='square_outer' and adaptive='True'",
 }
-# noises = [0, 0.005, 0.01, 0.02]
-# samples = [160000]
-# clusters = [None, 4]
-# solvers = {
-#     "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='qsvt'",
-#     "$\\qcheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='q_cheb'",
-#     "$\\cups$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='False'",
-#     "$\\caps$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='True'",
-#     "$\\qcheb_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='q_cheb'",
-#     "$\\cups_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='False'",
-#     "$\\caps_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='True'",
-# }
+noises = [0, 0.005, 0.01, 0.02]
+samples = [160000]
+clusters = [None, 4]
+solvers = {
+    "$\\qsvt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='qsvt'",
+    "$\\qcheb$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='q_cheb'",
+    "$\\chebopt$": "select steps, semi_iterative.'error 50 percentile', noise, samples, kappa, num_clusters from semi_iterative where transform='None' and poly_kind='chebopt'",
+    "$\\cups$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='False'",
+    "$\\caps$": "select steps, cap.'error 50 percentile', noise, samples, kappa, num_clusters from cap where transform='None' and adaptive='True'",
+    "$\\qcheb_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='q_cheb'",
+    "$\\chebopt_\\mathrm{sq}'$": "select steps, semi_iterative.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from semi_iterative where transform='square_outer' and poly_kind='chebopt'",
+    "$\\cups_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='False'",
+    "$\\caps_\\mathrm{sq}$": "select steps, cap.'error 50 percentile', 2 * noise as noise, samples, kappa, num_clusters from cap where transform='square' and adaptive='True'",
+}
 
 errors = np.zeros((len(solvers), len(clusters), len(noises), len(samples)), dtype=float)
 errors[:] = np.inf

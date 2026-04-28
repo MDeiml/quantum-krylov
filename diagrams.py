@@ -23,7 +23,7 @@ np.savetxt("eigs.csv", eig_data.T, newline="\\\\\n")
 def print_poly(p):
     print(str(p.convert(kind=np.polynomial.Polynomial, domain=[0, 1])).replace("**", "^").replace("(", "*(").replace("x", "*x"))
 
-print("optimal, cg, cheb, q_cheb, cup, cap, rho")
+print("optimal, cg, cheb, q_cheb, chebopt, cup, cap, rho")
 
 poly_best = np.polynomial.Chebyshev.fit(A.D, 1 / A.D, steps, w=A.b, domain=[-1, 1])
 print_poly(poly_best)
@@ -41,6 +41,10 @@ print_poly(poly_cheb)
 A.reset()
 poly_qcheb = semi_iterative_solver(A, steps // 2, np.inf, poly_kind="q_cheb")
 print_poly(poly_qcheb)
+
+A.reset()
+poly_chebopt = semi_iterative_solver(A, steps // 2, np.inf, poly_kind="chebopt")
+print_poly(poly_chebopt)
 
 A.reset()
 poly_cup = cap_solver(A, steps, samples, adaptive=False)

@@ -16,7 +16,7 @@ runner.test_solver(
         "steps": range(1, 17),
         "samples": [10000, 40000, 160000],
         "transform": [None, "square"],
-        "poly_kind": ["qsvt", "cheb", "q_cheb"],
+        "poly_kind": ["qsvt", "cheb", "q_cheb", "chebopt"],
     },
 )
 
@@ -27,6 +27,6 @@ runner.test_solver(
         "steps": range(1, 17),
         "samples": [10000, 40000, 160000],
         "transform": ["square_outer"],
-        "poly_kind": ["qsvt", "q_cheb"],
+        "poly_kind": ["qsvt", "q_cheb", "chebopt"],
     },
 )

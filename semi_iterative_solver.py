@@ -12,7 +12,7 @@ def semi_iterative_solver(
 
     kappa = A.kappa
     if transform == "square_outer":
-        assert poly_kind in ["qsvt", "q_cheb"]
+        assert poly_kind in ["qsvt", "q_cheb", "chebopt"]
         kappa = np.sqrt(kappa)
 
     if poly_kind == "qsvt":
@@ -31,14 +31,17 @@ def semi_iterative_solver(
             )
 
         poly = np.polynomial.Chebyshev(coefficients)
-    elif poly_kind in ["cheb", "q_cheb"]:
-        poly = np.polynomial.Chebyshev([0] * steps + [0, 1])
-        if poly_kind == "q_cheb":
+    elif poly_kind in ["cheb", "q_cheb", "chebopt"]:
+        if poly_kind in ["cheb", "q_cheb"]:
+            poly = np.polynomial.Chebyshev([0] * steps + [0, 1])
+        else:
+            poly = np.polynomial.Chebyshev([0] * steps + [(1 - 1/A.kappa) / (1 + 1/A.kappa), 1])
+        if poly_kind in ["q_cheb", "chebopt"]:
             kappa = kappa**2
         poly = poly((X - (1 / kappa + 1) / 2) / (1 - 1 / kappa) * 2)
         poly = 1 - poly / poly(0)
 
-        if poly_kind == "q_cheb":
+        if poly_kind in ["q_cheb", "chebopt"]:
             poly = poly(sq)
 
         poly = poly // X
